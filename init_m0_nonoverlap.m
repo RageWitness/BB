@@ -88,7 +88,7 @@ function Config = default_config_m0()
                                 'prior_time_known', 'ordinary_target'};
 
     % --- trusted_fixed ---
-    Config.m0.trusted.TrustedNum     = 1;
+    Config.m0.trusted.TrustedNum     = 2;
     Config.m0.trusted.lambda_arrival = 0.005;   % 到达率 (1/s)
     Config.m0.trusted.life_mode      = 'geom';  % 'geom' 或 'exp'
     Config.m0.trusted.life_param     = 0.05;    % geom: p_end; exp: mu(s)
