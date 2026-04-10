@@ -1,13 +1,13 @@
-%% MAIN_SIMULATION  主仿真入口 — M0 源调度 + M1 信道观测
+%% MAIN_SIMULATION  主仿真入口 — M0 源调度 + M1 信道观测 + M2.5 指纹库
 %
 %  功能：
-%    1. M0 初始化 + M1 初始化
+%    1. M0 初始化 + M1 初始化 + M2.5 指纹库构建
 %    2. 主循环：逐帧调度源 → 生成 RSS 观测
 %    3. 硬约束验证
 %    4. 统计输出
-%    5. 可视化（场景布局、频带占用时间线、RSS 热力图、RSS vs 距离）
+%    5. 可视化（场景布局、频带占用时间线、RSS 热力图、RSS vs 距离、指纹热力图）
 %
-%  后续模块接入点：在主循环内 step_m1 之后添加 M2.5/M3/M4 等
+%  后续模块接入点：在主循环内 step_m1 之后添加 M3/M4 等
 
 clear; clc; close all;
 rng(42);
@@ -23,6 +23,10 @@ fprintf('============================================\n\n');
 
 % --- M1 初始化 ---
 [Bands, ChannelState, Config] = init_m1_channel(Config, APs);
+
+% --- M2.5 指纹库与模板库 ---
+[SpatialFP, SignatureLib] = init_m25_single_source_fp( ...
+    APs, Bands, GridValid, Config, SourceTemplates);
 
 % --- 全局参数 ---
 T = Config.m0.T_total;
@@ -47,6 +51,7 @@ fprintf('\n--- 主循环开始 (%d 帧) ---\n', T);
 FrameStates    = cell(1, T);
 ObsFrames      = cell(1, T);
 Y_dBm_all      = zeros(M, B, T);
+Y_lin_all       = zeros(M, B, T);
 occupancy_matrix = zeros(T, B);   % 0=空, 1=trusted, 2=prior_pos, 3=prior_time, 4=target
 
 tic;
@@ -59,16 +64,14 @@ for t = 1:T
     [ChannelState, ObsFrame] = step_m1_generate_obs( ...
         FrameState_t, APs, Bands, ChannelState, Config, t);
 
-    % --- 后续模块接入点 ---
-    % [TODO] M2.5: 指纹库查询
-    % [TODO] M3:   单源事件检测
-    % [TODO] M4:   WKNN 定位
+    % --- 后续模块（M3/M4 在主循环后以事件级处理） ---
     % [TODO] M5/M6: 误差统计与标校
 
     % --- 存储 ---
     FrameStates{t} = FrameState_t;
     ObsFrames{t}   = ObsFrame;
     Y_dBm_all(:, :, t) = ObsFrame.Y_dBm;
+    Y_lin_all(:, :, t)  = ObsFrame.Y_lin;
 
     % 记录占用类型
     for b = 1:B
@@ -89,6 +92,16 @@ for t = 1:T
 end
 elapsed = toc;
 fprintf('主循环完成: %d 帧, 耗时 %.2f s (%.1f 帧/s)\n', T, elapsed, T/elapsed);
+
+%% ========== 第 2.5 阶段：M3 事件分类 + M4 WKNN 定位 ==========
+
+% --- M3：单源事件分类 ---
+EventList = run_m3_event_classifier_single_source( ...
+    Y_dBm_all, Y_lin_all, SpatialFP, SignatureLib, SourceTemplates, Config);
+
+% --- M4：WKNN 定位（只对需定位的事件） ---
+LocResults = run_m4_wknn_localization( ...
+    EventList, SpatialFP, FrameStates, Config);
 
 %% ========== 第三阶段：验证 ==========
 
@@ -233,6 +246,132 @@ for b = 1:B
     grid on;
 end
 sgtitle('RSS vs 源-AP 距离');
+
+% ===== 图5：SpatialFP 指纹热力图 =====
+% 含义：在每个网格点放置参考信源(0dBm)，16个AP接收的平均RSS
+% mean_dBm(g) 反映该位置信源被 AP 阵列整体感知的强弱
+figure('Name', '指纹库热力图', 'Position', [100 100 1200 700]);
+for b = 1:B
+    subplot(2, 2, b);
+    scatter(SpatialFP.grid_xy(:,1), SpatialFP.grid_xy(:,2), ...
+        12, SpatialFP.band(b).mean_dBm, 'filled');
+    hold on;
+    plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
+    colorbar;
+    xlabel('X (m)'); ylabel('Y (m)');
+    title(sprintf('Band %d (%s) 各点平均 RSS [dBm]', b, Bands.name{b}));
+    axis equal; grid on;
+    xlim(Config.area.x_range); ylim(Config.area.y_range);
+end
+sgtitle(sprintf('M2.5 指纹库: 网格点放信源(ref=%d dBm), 16AP 平均接收 RSS', ...
+    SpatialFP.ref_power_dBm(1)));
+
+% ===== 图6：M3 事件分类时间线 =====
+if ~isempty(EventList)
+    figure('Name', 'M3 事件分类', 'Position', [50 50 1200 400]);
+
+    type_color_map = struct( ...
+        'trusted_fixed',    [0.2 0.6 1], ...
+        'prior_pos_known',  [0 0.8 0.4], ...
+        'prior_time_known', [1 0.7 0], ...
+        'ordinary_target',  [0.9 0.2 0.2]);
+    hold on;
+    for e = 1:numel(EventList)
+        ev = EventList(e);
+        y_pos = ev.band_id;
+        switch ev.type_hat
+            case 'trusted_fixed',    clr = [0.2 0.6 1];
+            case 'prior_pos_known',  clr = [0 0.8 0.4];
+            case 'prior_time_known', clr = [1 0.7 0];
+            case 'ordinary_target',  clr = [0.9 0.2 0.2];
+            otherwise,               clr = [0.5 0.5 0.5];
+        end
+        % 画水平条
+        patch([ev.t_start, ev.t_end, ev.t_end, ev.t_start], ...
+              [y_pos-0.35, y_pos-0.35, y_pos+0.35, y_pos+0.35], ...
+              clr, 'EdgeColor', clr*0.7, 'FaceAlpha', 0.8);
+    end
+    hold off;
+    xlabel('帧号'); ylabel('频带');
+    title('M3 事件分类时间线');
+    set(gca, 'YTick', 1:B);
+    ylim([0.5, B+0.5]);
+    xlim([1, T]);
+    grid on;
+
+    % 图例
+    legend_entries = {};
+    legend_handles = [];
+    for type_cell = {'trusted_fixed', 'prior_pos_known', 'prior_time_known', 'ordinary_target'}
+        tn = type_cell{1};
+        switch tn
+            case 'trusted_fixed',    clr = [0.2 0.6 1];
+            case 'prior_pos_known',  clr = [0 0.8 0.4];
+            case 'prior_time_known', clr = [1 0.7 0];
+            case 'ordinary_target',  clr = [0.9 0.2 0.2];
+        end
+        h = patch(NaN, NaN, clr, 'FaceAlpha', 0.8);
+        legend_handles(end+1) = h; %#ok<AGROW>
+        legend_entries{end+1} = strrep(tn, '_', '\_'); %#ok<AGROW>
+    end
+    legend(legend_handles, legend_entries, 'Location', 'best');
+end
+
+% ===== 图7：M4 定位结果散点图 =====
+if ~isempty(LocResults)
+    figure('Name', 'M4 定位结果', 'Position', [100 100 800 700]);
+
+    % 背景：有效网格 + AP
+    plot(GridValid.xy(:,1), GridValid.xy(:,2), '.', 'Color', [0.9 0.9 0.9], 'MarkerSize', 2);
+    hold on;
+    plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
+
+    % 画每个定位结果
+    for k = 1:numel(LocResults)
+        lr = LocResults(k);
+        if isempty(lr.true_pos_xy) || all(lr.true_pos_xy == 0)
+            continue;
+        end
+
+        switch lr.type_hat
+            case 'ordinary_target',  clr = [0.9 0.2 0.2];
+            case 'prior_time_known', clr = [1 0.7 0];
+            otherwise,               clr = [0.5 0.5 0.5];
+        end
+
+        % 真值位置
+        plot(lr.true_pos_xy(1), lr.true_pos_xy(2), 'o', ...
+            'Color', clr, 'MarkerSize', 8, 'MarkerFaceColor', clr);
+        % 估计位置
+        plot(lr.est_pos_xy(1), lr.est_pos_xy(2), 'x', ...
+            'Color', clr*0.6, 'MarkerSize', 10, 'LineWidth', 2);
+        % 连线
+        plot([lr.true_pos_xy(1), lr.est_pos_xy(1)], ...
+             [lr.true_pos_xy(2), lr.est_pos_xy(2)], ...
+             '-', 'Color', [clr, 0.4], 'LineWidth', 1);
+    end
+    hold off;
+
+    xlabel('X (m)'); ylabel('Y (m)');
+    title('M4 WKNN 定位结果 (o=真值, x=估计)');
+    axis equal; grid on;
+    xlim(Config.area.x_range); ylim(Config.area.y_range);
+
+    % 图例
+    leg_h = [];
+    leg_s = {};
+    leg_h(end+1) = plot(NaN, NaN, 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
+    leg_s{end+1} = 'AP';
+    leg_h(end+1) = plot(NaN, NaN, 'o', 'Color', [0.9 0.2 0.2], 'MarkerSize', 8, 'MarkerFaceColor', [0.9 0.2 0.2]);
+    leg_s{end+1} = 'target 真值';
+    leg_h(end+1) = plot(NaN, NaN, 'x', 'Color', [0.9 0.2 0.2]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
+    leg_s{end+1} = 'target 估计';
+    leg_h(end+1) = plot(NaN, NaN, 'o', 'Color', [1 0.7 0], 'MarkerSize', 8, 'MarkerFaceColor', [1 0.7 0]);
+    leg_s{end+1} = 'prior\_time 真值';
+    leg_h(end+1) = plot(NaN, NaN, 'x', 'Color', [1 0.7 0]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
+    leg_s{end+1} = 'prior\_time 估计';
+    legend(leg_h, leg_s, 'Location', 'best');
+end
 
 fprintf('\n============================================\n');
 fprintf('  仿真完成\n');

@@ -1,4 +1,4 @@
-function ChannelState = init_m1_channel_state(Config, APs, Bands)
+ function ChannelState = init_m1_channel_state(Config, APs, Bands)
 % INIT_M1_CHANNEL_STATE  初始化 M1 信道状态
 %
 %   ChannelState = init_m1_channel_state(Config, APs, Bands)
