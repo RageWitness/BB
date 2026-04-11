@@ -75,11 +75,11 @@ for si = 1:N_sweep
     ChannelState.noise_n0_dBmHz = n0_val * ones(1, B);
 
     % (c) M1 观测循环
-    Y_dBm_all = zeros(M, B, T);
+    Y_lin_all = zeros(M, B, T);
     for t = 1:T
         [ChannelState, ObsFrame] = step_m1_generate_obs( ...
             FrameStates{t}, APs, Bands, ChannelState, Config, t);
-        Y_dBm_all(:, :, t) = ObsFrame.Y_dBm;
+        Y_lin_all(:, :, t) = ObsFrame.Y_lin;
     end
 
     % (d) 跳过 M3，直接 WKNN 定位
@@ -91,7 +91,7 @@ for si = 1:N_sweep
             if ~apb.has_source, continue; end
             if ~strcmp(apb.source_type, 'ordinary_target'), continue; end
 
-            F_obs = Y_dBm_all(:, b, t);
+            F_obs = Y_lin_all(:, b, t);
             [dv, ~] = compute_wknn_distance_power_corrected(F_obs, SpatialFP.band(b));
             [ni, ~, nw] = select_knn_neighbors_m4(dv, K);
             ep = estimate_position_wknn_m4(SpatialFP.grid_xy, ni, nw);

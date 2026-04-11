@@ -27,23 +27,23 @@ K = 5;
 % 三组实验配置
 experiments = struct();
 
-% --- 实验 A：无阴影、低噪声、固定 0 dBm ---
-experiments(1).name     = 'A: 无阴影 + 低噪声 + 0dBm';
+% --- 实验 A：无阴影、低噪声、固定 100 dBm（与库相同） ---
+experiments(1).name     = 'A: 无阴影 + 低噪声 + 100dBm';
 experiments(1).sigma_dB = [0, 0, 8, 8];       % Band 1/2 阴影关闭
 experiments(1).n0_dBmHz = -200;                % 极低噪声
-experiments(1).power_range = [0, 0; 0, 0; -12, -3; -12, -3];  % Band 1/2 固定 0 dBm
+experiments(1).power_range = [100, 100; 100, 100; 100, 100; 100, 100];
 
-% --- 实验 B：恢复阴影、低噪声、固定 0 dBm ---
-experiments(2).name     = 'B: 有阴影 + 低噪声 + 0dBm';
+% --- 实验 B：恢复阴影、低噪声、固定 100 dBm ---
+experiments(2).name     = 'B: 有阴影 + 低噪声 + 100dBm';
 experiments(2).sigma_dB = [6, 6, 8, 8];        % 恢复默认阴影
 experiments(2).n0_dBmHz = -200;
-experiments(2).power_range = [0, 0; 0, 0; -12, -3; -12, -3];
+experiments(2).power_range = [100, 100; 100, 100; 100, 100; 100, 100];
 
 % --- 实验 C：阴影 + 正常噪声 + 随机功率 + 约束 alpha ---
 experiments(3).name     = 'C: 有阴影 + 正常噪声 + 随机功率';
 experiments(3).sigma_dB = [6, 6, 8, 8];
 experiments(3).n0_dBmHz = -174;                % 正常热噪声
-experiments(3).power_range = [-15, -5; -15, -5; -12, -3; -12, -3];
+experiments(3).power_range = [50, 65; 50, 65; 50, 65; 50, 65];
 
 % 存储结果
 all_results = cell(1, 3);
@@ -79,25 +79,27 @@ for ei = 1:3
     ChannelState = init_m1_channel_state(Config, APs, Bands);
     ChannelState.noise_n0_dBmHz = exp.n0_dBmHz * ones(1, B);
 
-    Y_dBm_all = zeros(M, B, T);
+    Y_lin_all = zeros(M, B, T);
     for t = 1:T
         [ChannelState, ObsFrame] = step_m1_generate_obs( ...
             FrameStates{t}, APs, Bands, ChannelState, Config, t);
-        Y_dBm_all(:, :, t) = ObsFrame.Y_dBm;
+        Y_lin_all(:, :, t) = ObsFrame.Y_lin;
     end
 
-    % ---- match_cfg（实验 C 启用约束 alpha） ----
+    % ---- match_cfg（线性比例 alpha 约束） ----
     match_cfg = struct();
     match_cfg.mode = 'shifted_euclidean';
     if ei == 3
-        % 库 ref_power = 0 dBm, target 范围 [-15, -5]
-        % alpha = ref - tx, 所以 alpha in [5, 15]
-        match_cfg.alpha_min_dB = 3;    % 留裕量
-        match_cfg.alpha_max_dB = 20;
+        % 库 ref_power = 100 dBm, target 范围 [50, 65] dBm
+        % alpha = P_ref_lin / P_tx_lin = 10^((100-P_tx)/10)
+        % P_tx = 65 → alpha = 10^(35/10) ≈ 3162
+        % P_tx = 50 → alpha = 10^(50/10) = 100000
+        match_cfg.alpha_min = 1e3;
+        match_cfg.alpha_max = 2e5;
     else
-        % 固定 0 dBm, alpha 应接近 0
-        match_cfg.alpha_min_dB = -3;
-        match_cfg.alpha_max_dB = 3;
+        % 固定 100 dBm 与库相同, alpha 应接近 1
+        match_cfg.alpha_min = 0.5;
+        match_cfg.alpha_max = 2;
     end
 
     % ---- 直接 WKNN 定位（仅 Band 1/2 的 ordinary_target） ----
@@ -110,7 +112,7 @@ for ei = 1:3
             if ~apb.has_source, continue; end
             if ~strcmp(apb.source_type, 'ordinary_target'), continue; end
 
-            F_obs = Y_dBm_all(:, b, t);
+            F_obs = Y_lin_all(:, b, t);
             [dv, ~] = compute_wknn_distance_power_corrected(F_obs, SpatialFP.band(b), match_cfg);
             [ni, ~, nw] = select_knn_neighbors_m4(dv, K);
             ep = estimate_position_wknn_m4(SpatialFP.grid_xy, ni, nw);

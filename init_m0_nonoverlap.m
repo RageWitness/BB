@@ -107,10 +107,10 @@ function Config = default_config_m0()
     Config.m0.target.life_mode       = 'geom';          % 'geom' 或 'uniform'
     Config.m0.target.life_param      = 0.08;            % geom: p_end
     Config.m0.target.life_range      = [5, 30];         % uniform 模式下 [Lmin, Lmax]
-    Config.m0.target.power_range_dBm = [-15, -5;   ... % band 1
-                                        -15, -5;   ... % band 2
-                                        -12, -3;   ... % band 3
-                                        -12, -3];      % band 4
+    Config.m0.target.power_range_dBm = [50, 65;   ... % band 1
+                                        50, 65;   ... % band 2
+                                        50, 65;   ... % band 3
+                                        50, 65];      % band 4
     Config.m0.target.position_mode   = 'uniform';       % 'uniform' 或 'hotspot'
 end
 

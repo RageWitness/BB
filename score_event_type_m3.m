@@ -188,7 +188,7 @@ function sc = fill_score_defaults(Config)
     if isfield(s, 'target_power_range')
         sc.target_power_range = s.target_power_range;
     else
-        sc.target_power_range = [-15, -5];  % dBm
+        sc.target_power_range = [50, 65];  % dBm
     end
     if isfield(s, 'target_power_margin')
         sc.target_power_margin = s.target_power_margin;

@@ -29,10 +29,10 @@ function SourceTemplates = build_source_templates_nonoverlap(Config, GridValid)
         tpl.bands_covered        = 1:B;
 
         % 功率
-        tpl.power_nominal_dBm    = 15;
-        tpl.power_range_dBm      = [15, 15];           % 固定功率
+        tpl.power_nominal_dBm    = 140;
+        tpl.power_range_dBm      = [140, 140];         % 固定功率
         tpl.power_stability_level = 3;                  % 最稳定
-        tpl.tx_power_dBm         = 15;
+        tpl.tx_power_dBm         = 140;
 
         % 到达与寿命
         tpl.lambda_arrival       = Config.m0.trusted.lambda_arrival;
@@ -79,10 +79,10 @@ function SourceTemplates = build_source_templates_nonoverlap(Config, GridValid)
             tpl.band_id              = b;
 
             % 功率
-            tpl.power_nominal_dBm    = 0;
-            tpl.power_range_dBm      = [0, 0];
+            tpl.power_nominal_dBm    = 70;
+            tpl.power_range_dBm      = [70, 70];
             tpl.power_stability_level = 3;
-            tpl.tx_power_dBm         = 0;
+            tpl.tx_power_dBm         = 70;
 
             % 时间模式
             tpl.time_pattern_type    = 'scheduled';
@@ -147,10 +147,10 @@ function SourceTemplates = build_source_templates_nonoverlap(Config, GridValid)
             tpl.band_id              = b;
 
             % 功率
-            tpl.power_nominal_dBm    = 0;
-            tpl.power_range_dBm      = [0, 0];
+            tpl.power_nominal_dBm    = 70;
+            tpl.power_range_dBm      = [70, 70];
             tpl.power_stability_level = 2;
-            tpl.tx_power_dBm         = 0;
+            tpl.tx_power_dBm         = 70;
 
             % 时间模式
             tpl.time_pattern_type    = 'scheduled';

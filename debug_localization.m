@@ -56,16 +56,17 @@ for k = 1:min(numel(LocResults), 10)
     d_to_grid = sqrt(sum((SpatialFP.grid_xy - true_pos).^2, 2));
     [d_nearest_grid, g_true] = min(d_to_grid);
 
-    % 该网格点在指纹库中的中心化指纹
-    F_db_centered_true = SpatialFP.band(b).centered_dBm(:, g_true);
+    % 该网格点在指纹库中的中心化指纹（线性域）
+    F_db_cn_true = SpatialFP.band(b).centered_lin(:, g_true);
 
-    % 事件聚合指纹
-    F_obs = lr.obs_fp_dBm;
-    mu_obs = mean(F_obs);
-    F_obs_centered = F_obs - mu_obs;
+    % 事件聚合指纹（dBm 用于打印，线性用于分析）
+    F_obs_dBm = lr.obs_fp_dBm;
+    F_obs_lin = lr.obs_fp_lin;
+    mu_obs_lin = mean(F_obs_lin);
+    F_obs_cn = F_obs_lin / max(mu_obs_lin, 1e-30);
 
-    % 真值网格点的功率修正距离
-    d_true_grid = norm(F_obs_centered - F_db_centered_true);
+    % 真值网格点的归一化距离
+    d_true_grid = norm(F_obs_cn - F_db_cn_true);
 
     % 最佳匹配网格点
     g_best = lr.neighbor_idx(1);
@@ -75,27 +76,27 @@ for k = 1:min(numel(LocResults), 10)
     fprintf('\n  Event %d (band %d):\n', lr.event_id, b);
     fprintf('    真值位置:     (%.1f, %.1f)\n', true_pos(1), true_pos(2));
     fprintf('    最近网格点:   g=%d, 距真值 %.2f m\n', g_true, d_nearest_grid);
-    fprintf('    真值网格距离: d=%.4f (指纹空间)\n', d_true_grid);
+    fprintf('    真值网格距离: d=%.4f (线性归一化空间)\n', d_true_grid);
     fprintf('    最佳匹配:     g=%d (%.1f, %.1f), d=%.4f\n', ...
         g_best, best_pos(1), best_pos(2), d_best);
     fprintf('    估计位置:     (%.1f, %.1f)\n', est_pos(1), est_pos(2));
     fprintf('    定位误差:     %.2f m\n', lr.loc_error);
 
-    % 检查观测指纹与指纹库的数值范围
+    % 检查观测指纹与指纹库的数值范围（dBm 打印）
     F_db_raw_true = SpatialFP.band(b).F_dBm(:, g_true);
-    fprintf('    观测指纹均值: %.1f dBm\n', mu_obs);
+    fprintf('    观测指纹均值: %.1f dBm\n', mean(F_obs_dBm));
     fprintf('    指纹库均值:   %.1f dBm (g_true)\n', SpatialFP.band(b).mean_dBm(g_true));
-    fprintf('    观测指纹范围: [%.1f, %.1f] dBm\n', min(F_obs), max(F_obs));
+    fprintf('    观测指纹范围: [%.1f, %.1f] dBm\n', min(F_obs_dBm), max(F_obs_dBm));
     fprintf('    指纹库范围:   [%.1f, %.1f] dBm (g_true)\n', min(F_db_raw_true), max(F_db_raw_true));
 
-    % 中心化后对比
-    fprintf('    |F_obs_c|:    %.4f\n', norm(F_obs_centered));
-    fprintf('    |F_db_c|:     %.4f\n', norm(F_db_centered_true));
+    % 归一化后对比
+    fprintf('    |F_obs_cn|:   %.4f\n', norm(F_obs_cn));
+    fprintf('    |F_db_cn|:    %.4f\n', norm(F_db_cn_true));
     fprintf('    cos相似度:    %.6f\n', ...
-        dot(F_obs_centered, F_db_centered_true) / ...
-        (norm(F_obs_centered) * norm(F_db_centered_true) + 1e-20));
+        dot(F_obs_cn, F_db_cn_true) / ...
+        (norm(F_obs_cn) * norm(F_db_cn_true) + 1e-20));
 
-    % 排名：真值网格点在距离排序中排第几
+    % 排名：真值网格点在距离排序中排第几（线性域）
     ev_idx = find([EventList.event_id] == lr.event_id);
     ev = EventList(ev_idx);
     F_obs_recomp = aggregate_event_fingerprint_m4(ev);
@@ -115,8 +116,8 @@ for t = 1:10:T  % 每 10 帧取一个
         if ~apb.has_source, continue; end
         if ~strcmp(apb.source_type, 'ordinary_target'), continue; end
 
-        % 直接取这一帧的观测
-        F_obs_direct = Y_dBm_all(:, b, t);
+        % 直接取这一帧的观测（线性域）
+        F_obs_direct = Y_lin_all(:, b, t);
 
         % WKNN 定位
         [dv, ~] = compute_wknn_distance_power_corrected(F_obs_direct, SpatialFP.band(b));

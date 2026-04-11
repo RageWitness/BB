@@ -37,7 +37,8 @@ function loc_result = record_loc_results_m4(event, est_pos_xy, F_obs, ...
     loc_result.time_range   = event.time_range;
 
     % 观测与估计
-    loc_result.obs_fp_dBm   = F_obs;
+    loc_result.obs_fp_lin   = F_obs;
+    loc_result.obs_fp_dBm   = 10 * log10(max(F_obs, 1e-30));
     loc_result.est_pos_xy   = est_pos_xy;
 
     % 近邻信息
