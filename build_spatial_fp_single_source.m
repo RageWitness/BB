@@ -14,6 +14,7 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
 %       SpatialFP.ref_power_dBm        - (1 x B) 各频带参考发射功率
 %       SpatialFP.band(b).F_dBm        - (M x G)
 %       SpatialFP.band(b).F_lin        - (M x G)
+%       SpatialFP.band(b).std_dBm      - (M x G) 每AP每网格点的 RSS 标准差 (dB)
 %       SpatialFP.band(b).mean_dBm     - (1 x G)
 %       SpatialFP.band(b).centered_dBm - (M x G)
 %       SpatialFP.band(b).fc_Hz
@@ -40,19 +41,22 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
     fprintf('[M2.5] 构建 SpatialFP: M=%d AP, G=%d 网格点, B=%d 频带\n', M, G, B);
 
     for b = 1:B
-        F_dBm = zeros(M, G);
-        F_lin = zeros(M, G);
+        F_dBm   = zeros(M, G);
+        F_lin   = zeros(M, G);
+        Std_dBm = zeros(M, G);
 
         for g = 1:G
-            [rss_dBm, rss_lin] = simulate_reference_fp_point_m1bridge( ...
+            [rss_dBm, rss_lin, rss_std] = simulate_reference_fp_point_m1bridge( ...
                 GridValid.xy(g, :), b, ref_power(b), APs, Bands, Config);
-            F_dBm(:, g) = rss_dBm;
-            F_lin(:, g) = rss_lin;
+            F_dBm(:, g)   = rss_dBm;
+            F_lin(:, g)   = rss_lin;
+            Std_dBm(:, g) = rss_std;
         end
 
         % 组装单频带结构
-        band_fp.F_dBm = F_dBm;
-        band_fp.F_lin = F_lin;
+        band_fp.F_dBm   = F_dBm;
+        band_fp.F_lin   = F_lin;
+        band_fp.std_dBm = Std_dBm;
         band_fp.fc_Hz = Bands.fc_Hz(b);
         band_fp.bw_Hz = Bands.bw_Hz(b);
         band_fp.model = Bands.model{b};
