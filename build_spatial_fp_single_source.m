@@ -20,6 +20,8 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
 %       SpatialFP.band(b).centered_dBm - (M x G)
 %       SpatialFP.band(b).mean_lin     - (1 x G)
 %       SpatialFP.band(b).centered_lin - (M x G)
+%       SpatialFP.band(b).norm_l1      - (1 x G)
+%       SpatialFP.band(b).F_shape_l1   - (M x G)
 %       SpatialFP.band(b).fc_Hz
 %       SpatialFP.band(b).bw_Hz
 %       SpatialFP.band(b).model
@@ -73,9 +75,10 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
 
         SpatialFP.band(b) = band_fp;
 
-        fprintf('  Band %d (%s): F_dBm [%.1f, %.1f], F_lin [%.2e, %.2e]\n', ...
+        fprintf('  Band %d (%s): F_dBm [%.1f, %.1f], F_lin [%.2e, %.2e], shape_l1 [%.4f, %.4f]\n', ...
             b, Bands.name{b}, min(F_dBm(:)), max(F_dBm(:)), ...
-            min(F_lin(:)), max(F_lin(:)));
+            min(F_lin(:)), max(F_lin(:)), ...
+            min(band_fp.F_shape_l1(:)), max(band_fp.F_shape_l1(:)));
     end
 
     fprintf('[M2.5] SpatialFP 构建完成\n');

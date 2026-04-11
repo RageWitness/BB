@@ -66,24 +66,33 @@ function LocResults = run_m4_wknn_localization( ...
         ev = loc_events(k);
         b  = ev.band_id;
 
-        %% a. 聚合事件指纹
-        F_obs = aggregate_event_fingerprint_m4(ev);
+        %% a. 聚合事件指纹（含形状向量）
+        [F_obs_lin, F_obs_shape] = aggregate_event_fingerprint_m4(ev);
 
-        %% b. 功率修正距离计算
-        [dist_vec, ~] = compute_wknn_distance_power_corrected( ...
-            F_obs, SpatialFP.band(b));
+        %% b. 形状+缩放距离计算
+        match_cfg = struct();
+        match_cfg.lambda_shape = m4cfg.lambda_shape;
+        match_cfg.lambda_resid = m4cfg.lambda_resid;
+        [D_vec, d_shape_vec, resid_vec, q_opt_vec] = ...
+            compute_wknn_distance_shape_scale( ...
+                F_obs_lin, F_obs_shape, SpatialFP.band(b), match_cfg);
 
         %% c. 选 K 近邻
         [neighbor_idx, neighbor_dist, weights] = select_knn_neighbors_m4( ...
-            dist_vec, m4cfg.K, m4cfg.eps_val);
+            D_vec, m4cfg.K, m4cfg.eps_val);
 
         %% d. 加权位置估计
         est_pos_xy = estimate_position_wknn_m4( ...
             SpatialFP.grid_xy, neighbor_idx, weights);
 
-        %% e. 记录结果
-        lr = record_loc_results_m4(ev, est_pos_xy, F_obs, ...
-            neighbor_idx, neighbor_dist, weights, FrameStates, Config);
+        %% e. 记录结果（含诊断信息）
+        extra_info = struct();
+        extra_info.q_opt_vec   = q_opt_vec;
+        extra_info.d_shape_vec = d_shape_vec;
+        extra_info.resid_vec   = resid_vec;
+
+        lr = record_loc_results_m4(ev, est_pos_xy, F_obs_lin, ...
+            neighbor_idx, neighbor_dist, weights, FrameStates, Config, extra_info);
 
         if isempty(LocResults)
             LocResults = lr;
@@ -119,7 +128,7 @@ function cfg = fill_m4_defaults(Config)
     if isfield(m4, 'K')
         cfg.K = m4.K;
     else
-        cfg.K = 5;
+        cfg.K = 3;
     end
 
     % 防除零常数
@@ -127,6 +136,18 @@ function cfg = fill_m4_defaults(Config)
         cfg.eps_val = m4.eps_val;
     else
         cfg.eps_val = 1e-6;
+    end
+
+    % 形状+缩放距离权重
+    if isfield(m4, 'lambda_shape')
+        cfg.lambda_shape = m4.lambda_shape;
+    else
+        cfg.lambda_shape = 0.7;
+    end
+    if isfield(m4, 'lambda_resid')
+        cfg.lambda_resid = m4.lambda_resid;
+    else
+        cfg.lambda_resid = 0.3;
     end
 end
 

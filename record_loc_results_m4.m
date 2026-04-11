@@ -1,21 +1,27 @@
 function loc_result = record_loc_results_m4(event, est_pos_xy, F_obs, ...
-    neighbor_idx, neighbor_dist, weights, FrameStates, Config)
+    neighbor_idx, neighbor_dist, weights, FrameStates, Config, extra_info)
 % RECORD_LOC_RESULTS_M4  记录单个事件的定位结果
 %
 %   loc_result = record_loc_results_m4(event, est_pos_xy, F_obs,
 %       neighbor_idx, neighbor_dist, weights, FrameStates, Config)
+%   loc_result = record_loc_results_m4(event, est_pos_xy, F_obs,
+%       neighbor_idx, neighbor_dist, weights, FrameStates, Config, extra_info)
 %
 %   输出 loc_result 包含：
 %     event_id, band_id, type_hat, route_action
-%     obs_fp_dBm       — 事件聚合指纹 (M x 1)
-%     est_pos_xy       — 估计位置 (1 x 2)
-%     neighbor_idx     — K 近邻索引
-%     neighbor_dist    — K 近邻距离
-%     weights          — 归一化权重
-%     match_score      — 最佳匹配距离的倒数
-%     true_pos_xy      — 真值位置（若可从 FrameStates 获取）
-%     loc_error        — 定位误差 (m)
-%     n0               — 当前噪声底 (dBm/Hz)
+%     obs_fp_lin        — 事件聚合指纹 (M x 1, 线性 mW)
+%     obs_fp_dBm        — 事件聚合指纹 (M x 1, dBm)
+%     est_pos_xy        — 估计位置 (1 x 2)
+%     neighbor_idx      — K 近邻索引
+%     neighbor_dist     — K 近邻距离
+%     weights           — 归一化权重
+%     match_score       — 最佳匹配距离的倒数
+%     true_pos_xy       — 真值位置（若可从 FrameStates 获取）
+%     loc_error         — 定位误差 (m)
+%     n0                — 当前噪声底 (dBm/Hz)
+%     q_opt_neighbors   — (1xK) 近邻的最优缩放系数（若提供 extra_info）
+%     d_shape_neighbors — (1xK) 近邻的形状距离（若提供 extra_info）
+%     resid_neighbors   — (1xK) 近邻的重构残差（若提供 extra_info）
 %
 %   输入：
 %       event           - 事件结构体
@@ -26,6 +32,7 @@ function loc_result = record_loc_results_m4(event, est_pos_xy, F_obs, ...
 %       weights         - (1 x K)
 %       FrameStates     - cell(1,T) 帧状态
 %       Config          - 配置
+%       extra_info      - [可选] 含 q_opt_vec, d_shape_vec, resid_vec
 
     loc_result = struct();
 
@@ -65,6 +72,17 @@ function loc_result = record_loc_results_m4(event, est_pos_xy, F_obs, ...
         loc_result.n0 = Config.m1.noise.n0_dBmHz;
     else
         loc_result.n0 = -174;  % 默认热噪声底
+    end
+
+    % 形状+缩放诊断信息
+    if nargin >= 9 && ~isempty(extra_info)
+        loc_result.q_opt_neighbors   = extra_info.q_opt_vec(neighbor_idx);
+        loc_result.d_shape_neighbors = extra_info.d_shape_vec(neighbor_idx);
+        loc_result.resid_neighbors   = extra_info.resid_vec(neighbor_idx);
+    else
+        loc_result.q_opt_neighbors   = [];
+        loc_result.d_shape_neighbors = [];
+        loc_result.resid_neighbors   = [];
     end
 end
 

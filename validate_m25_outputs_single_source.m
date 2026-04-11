@@ -36,6 +36,24 @@ function validate_m25_outputs_single_source(SpatialFP, SignatureLib)
             n_err = n_err + 1;
         end
 
+        % L1 形状指纹维度检查
+        if ~isfield(fb, 'F_shape_l1') || size(fb.F_shape_l1, 1) ~= M || size(fb.F_shape_l1, 2) ~= G
+            fprintf('  [ERROR] Band %d: F_shape_l1 维度不正确或缺失\n', b);
+            n_err = n_err + 1;
+        end
+        if ~isfield(fb, 'norm_l1') || length(fb.norm_l1) ~= G
+            fprintf('  [ERROR] Band %d: norm_l1 长度不正确或缺失\n', b);
+            n_err = n_err + 1;
+        end
+        % 形状指纹归一化检查：每列 L1 和应约为 1
+        if isfield(fb, 'F_shape_l1')
+            col_sums = sum(fb.F_shape_l1, 1);
+            bad_cols = sum(abs(col_sums - 1) > 1e-6);
+            if bad_cols > 0
+                fprintf('  [WARN] Band %d: F_shape_l1 有 %d 列 L1 和偏离 1\n', b, bad_cols);
+            end
+        end
+
         % 指纹值范围检查（RSS 不应超出 [-200, 30] dBm）
         if any(fb.F_dBm(:) > 30) || any(fb.F_dBm(:) < -200)
             fprintf('  [WARN] Band %d: F_dBm 值范围 [%.1f, %.1f] 可能异常\n', ...

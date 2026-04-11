@@ -22,7 +22,7 @@ base_override.fp.grid_step = 1;
 
 % 只用 Band 1/2
 test_bands = [1, 2];
-K = 5;
+K = 3;
 
 % 三组实验配置
 experiments = struct();
@@ -86,22 +86,6 @@ for ei = 1:3
         Y_lin_all(:, :, t) = ObsFrame.Y_lin;
     end
 
-    % ---- match_cfg（线性比例 alpha 约束） ----
-    match_cfg = struct();
-    match_cfg.mode = 'shifted_euclidean';
-    if ei == 3
-        % 库 ref_power = 100 dBm, target 范围 [50, 65] dBm
-        % alpha = P_ref_lin / P_tx_lin = 10^((100-P_tx)/10)
-        % P_tx = 65 → alpha = 10^(35/10) ≈ 3162
-        % P_tx = 50 → alpha = 10^(50/10) = 100000
-        match_cfg.alpha_min = 1e3;
-        match_cfg.alpha_max = 2e5;
-    else
-        % 固定 100 dBm 与库相同, alpha 应接近 1
-        match_cfg.alpha_min = 0.5;
-        match_cfg.alpha_max = 2;
-    end
-
     % ---- 直接 WKNN 定位（仅 Band 1/2 的 ordinary_target） ----
     errors = [];
     bands  = [];
@@ -113,8 +97,10 @@ for ei = 1:3
             if ~strcmp(apb.source_type, 'ordinary_target'), continue; end
 
             F_obs = Y_lin_all(:, b, t);
-            [dv, ~] = compute_wknn_distance_power_corrected(F_obs, SpatialFP.band(b), match_cfg);
-            [ni, ~, nw] = select_knn_neighbors_m4(dv, K);
+            F_shape = F_obs / (sum(F_obs) + 1e-30);
+            [D_vec, ~, ~, ~] = compute_wknn_distance_shape_scale( ...
+                F_obs, F_shape, SpatialFP.band(b));
+            [ni, ~, nw] = select_knn_neighbors_m4(D_vec, K);
             ep = estimate_position_wknn_m4(SpatialFP.grid_xy, ni, nw);
 
             err = norm(ep - apb.true_pos_xy);

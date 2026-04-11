@@ -28,7 +28,7 @@ ap_override.fp.grid_step = 1;  % 1m 网格（~90000 有效点）
 T = Config.m0.T_total;
 B = Config.m0.num_bands;
 M = APs.num;
-K = 5;  % WKNN 邻居数
+K = 3;  % WKNN 邻居数
 
 %% ========== 2. 运行 M0 循环（与 n0 无关） ==========
 
@@ -92,8 +92,10 @@ for si = 1:N_sweep
             if ~strcmp(apb.source_type, 'ordinary_target'), continue; end
 
             F_obs = Y_lin_all(:, b, t);
-            [dv, ~] = compute_wknn_distance_power_corrected(F_obs, SpatialFP.band(b));
-            [ni, ~, nw] = select_knn_neighbors_m4(dv, K);
+            F_shape = F_obs / (sum(F_obs) + 1e-30);
+            [D_vec, ~, ~, ~] = compute_wknn_distance_shape_scale( ...
+                F_obs, F_shape, SpatialFP.band(b));
+            [ni, ~, nw] = select_knn_neighbors_m4(D_vec, K);
             ep = estimate_position_wknn_m4(SpatialFP.grid_xy, ni, nw);
 
             err = norm(ep - apb.true_pos_xy);
