@@ -19,7 +19,12 @@ fprintf('============================================\n\n');
 %% ========== 第一阶段：初始化 ==========
 
 % --- M0 初始化 ---
-[SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap();
+% --- 场景配置（可调） ---
+sim_override.ap.num_x     = 8;   % 8 x 8 = 64 个 AP
+sim_override.ap.num_y     = 8;
+sim_override.fp.grid_step = 1;   % 1m 网格
+
+[SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap(sim_override);
 
 % --- M1 初始化 ---
 [Bands, ChannelState, Config] = init_m1_channel(Config, APs);

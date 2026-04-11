@@ -27,8 +27,8 @@ for e = 1:min(numel(EventList), 10)
             stype = apb.source_type;
             fprintf('    t=%d: src=%s, pos=(%.1f,%.1f), power=%.1f dBm\n', ...
                 t, stype, pos(1), pos(2), apb.tx_power_dBm);
-            unique_positions(end+1,:) = pos; %#ok<AGROW>
-            unique_types{end+1} = stype; %#ok<AGROW>
+            unique_positions(end+1,:) = pos; 
+            unique_types{end+1} = stype; 
         else
             fprintf('    t=%d: 无源！\n', t);
         end

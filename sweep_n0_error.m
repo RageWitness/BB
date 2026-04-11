@@ -16,7 +16,12 @@ fprintf('============================================\n\n');
 
 %% ========== 1. 一次性初始化 ==========
 
-[SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap();
+% --- 场景配置（可调） ---
+ap_override.ap.num_x   = 8;   % 8 x 8 = 64 个 AP
+ap_override.ap.num_y   = 8;
+ap_override.fp.grid_step = 1;  % 1m 网格（~90000 有效点）
+
+[SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap(ap_override);
 [Bands, ~, Config] = init_m1_channel(Config, APs);
 [SpatialFP, ~] = init_m25_single_source_fp(APs, Bands, GridValid, Config, SourceTemplates);
 

@@ -14,7 +14,10 @@ rng(42);  % 可重复
 fprintf('===== M0 冒烟测试开始 =====\n\n');
 
 %% 1. 初始化
-[SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap();
+ap_override.ap.num_x     = 8;   % 8 x 8 = 64 个 AP（可调）
+ap_override.ap.num_y     = 8;
+ap_override.fp.grid_step = 1;   % 1m 网格
+[SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap(ap_override);
 
 fprintf('\n--- 配置摘要 ---\n');
 fprintf('  区域: [%.0f, %.0f] x [%.0f, %.0f] m\n', ...
