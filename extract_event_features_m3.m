@@ -31,6 +31,15 @@ function EventList = extract_event_features_m3(EventListRaw, Y_dBm_all, Y_lin_al
     % 填充默认参数
     feat_cfg = fill_feat_defaults(Config);
 
+    % 先为所有事件预分配新字段（MATLAB struct 数组要求字段一致）
+    for e = 1:n_events
+        EventListRaw(e).power_level_est          = 0;
+        EventListRaw(e).power_stability_est      = 0;
+        EventListRaw(e).band_coverage_vec        = zeros(1, B);
+        EventListRaw(e).schedule_match_score     = 0;
+        EventListRaw(e).position_prior_match_score = 0;
+        EventListRaw(e).feat_vec                 = [];
+    end
     EventList = EventListRaw;
 
     for e = 1:n_events

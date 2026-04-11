@@ -350,27 +350,183 @@ if ~isempty(LocResults)
              [lr.true_pos_xy(2), lr.est_pos_xy(2)], ...
              '-', 'Color', [clr, 0.4], 'LineWidth', 1);
     end
-    hold off;
 
     xlabel('X (m)'); ylabel('Y (m)');
     title('M4 WKNN 定位结果 (o=真值, x=估计)');
     axis equal; grid on;
     xlim(Config.area.x_range); ylim(Config.area.y_range);
 
-    % 图例
-    leg_h = [];
-    leg_s = {};
-    leg_h(end+1) = plot(NaN, NaN, 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
-    leg_s{end+1} = 'AP';
-    leg_h(end+1) = plot(NaN, NaN, 'o', 'Color', [0.9 0.2 0.2], 'MarkerSize', 8, 'MarkerFaceColor', [0.9 0.2 0.2]);
-    leg_s{end+1} = 'target 真值';
-    leg_h(end+1) = plot(NaN, NaN, 'x', 'Color', [0.9 0.2 0.2]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
-    leg_s{end+1} = 'target 估计';
-    leg_h(end+1) = plot(NaN, NaN, 'o', 'Color', [1 0.7 0], 'MarkerSize', 8, 'MarkerFaceColor', [1 0.7 0]);
-    leg_s{end+1} = 'prior\_time 真值';
-    leg_h(end+1) = plot(NaN, NaN, 'x', 'Color', [1 0.7 0]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
-    leg_s{end+1} = 'prior\_time 估计';
-    legend(leg_h, leg_s, 'Location', 'best');
+    % 图例（在 hold on 状态下画不可见标记）
+    leg_h = gobjects(5, 1);
+    leg_h(1) = plot(NaN, NaN, 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
+    leg_h(2) = plot(NaN, NaN, 'o', 'Color', [0.9 0.2 0.2], 'MarkerSize', 8, 'MarkerFaceColor', [0.9 0.2 0.2]);
+    leg_h(3) = plot(NaN, NaN, 'x', 'Color', [0.9 0.2 0.2]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
+    leg_h(4) = plot(NaN, NaN, 'o', 'Color', [1 0.7 0], 'MarkerSize', 8, 'MarkerFaceColor', [1 0.7 0]);
+    leg_h(5) = plot(NaN, NaN, 'x', 'Color', [1 0.7 0]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
+    hold off;
+    legend(leg_h, {'AP', 'target 真值', 'target 估计', 'prior\_time 真值', 'prior\_time 估计'}, ...
+        'Location', 'best');
+end
+
+% ===== 图8：分频带定位误差统计 =====
+if ~isempty(LocResults)
+    % 收集有真值的定位结果
+    valid_mask = ~arrayfun(@(r) isnan(r.loc_error), LocResults);
+    valid_lr = LocResults(valid_mask);
+
+    if ~isempty(valid_lr)
+        all_bands  = [valid_lr.band_id];
+        all_errors = [valid_lr.loc_error];
+        all_types  = {valid_lr.type_hat};
+        unique_bands = unique(all_bands);
+
+        figure('Name', '分频带定位误差', 'Position', [100 50 1400 800]);
+
+        % --- 子图1：各频带误差箱线图 ---
+        subplot(2, 3, 1);
+        grp_data = [];
+        grp_label = [];
+        for bi = 1:numel(unique_bands)
+            bb = unique_bands(bi);
+            errs = all_errors(all_bands == bb);
+            grp_data  = [grp_data, errs]; %#ok<AGROW>
+            grp_label = [grp_label, bb * ones(1, numel(errs))]; %#ok<AGROW>
+        end
+        if numel(grp_data) > 1
+            boxplot(grp_data, grp_label);
+        else
+            bar(grp_label, grp_data);
+        end
+        xlabel('频带'); ylabel('定位误差 (m)');
+        title('各频带误差箱线图');
+        grid on;
+
+        % --- 子图2：各频带误差 CDF ---
+        subplot(2, 3, 2);
+        hold on;
+        band_colors = [0.2 0.6 1; 0 0.8 0.4; 1 0.7 0; 0.9 0.2 0.2];
+        leg_items = {};
+        for bi = 1:numel(unique_bands)
+            bb = unique_bands(bi);
+            errs = sort(all_errors(all_bands == bb));
+            n = numel(errs);
+            if n == 0, continue; end
+            cdf_y = (1:n) / n;
+            plot(errs, cdf_y, '-', 'Color', band_colors(bb,:), 'LineWidth', 2);
+            leg_items{end+1} = sprintf('Band %d (n=%d, med=%.1fm)', bb, n, median(errs)); %#ok<AGROW>
+        end
+        hold off;
+        xlabel('定位误差 (m)'); ylabel('CDF');
+        title('各频带误差累积分布');
+        legend(leg_items, 'Location', 'southeast');
+        grid on;
+
+        % --- 子图3：各频带 RMSE 柱状图 ---
+        subplot(2, 3, 3);
+        rmse_per_band = zeros(1, numel(unique_bands));
+        mean_per_band = zeros(1, numel(unique_bands));
+        n_per_band    = zeros(1, numel(unique_bands));
+        for bi = 1:numel(unique_bands)
+            bb = unique_bands(bi);
+            errs = all_errors(all_bands == bb);
+            rmse_per_band(bi) = sqrt(mean(errs.^2));
+            mean_per_band(bi) = mean(errs);
+            n_per_band(bi)    = numel(errs);
+        end
+        bar_data = [mean_per_band; rmse_per_band]';
+        bh = bar(unique_bands, bar_data);
+        bh(1).FaceColor = [0.3 0.6 0.9];
+        bh(2).FaceColor = [0.9 0.3 0.3];
+        xlabel('频带'); ylabel('误差 (m)');
+        title('各频带 Mean / RMSE');
+        legend('Mean', 'RMSE', 'Location', 'best');
+        grid on;
+        % 标注样本数
+        for bi = 1:numel(unique_bands)
+            text(unique_bands(bi), rmse_per_band(bi) + 2, ...
+                sprintf('n=%d', n_per_band(bi)), ...
+                'HorizontalAlignment', 'center', 'FontSize', 9);
+        end
+
+        % --- 子图4：按源类型分频带误差 ---
+        subplot(2, 3, 4);
+        type_list = {'ordinary_target', 'prior_time_known'};
+        type_short = {'target', 'prior\_time'};
+        type_colors = [0.9 0.2 0.2; 1 0.7 0];
+        hold on;
+        legend_h = gobjects(0);
+        legend_s = {};
+        for ti = 1:numel(type_list)
+            tmask = strcmp(all_types, type_list{ti});
+            for bi = 1:numel(unique_bands)
+                bb = unique_bands(bi);
+                bmask = all_bands == bb;
+                errs = all_errors(tmask & bmask);
+                if isempty(errs), continue; end
+                x_pos = bb + (ti - 1.5) * 0.2;
+                h = plot(x_pos * ones(size(errs)), errs, 'o', ...
+                    'Color', type_colors(ti,:), 'MarkerSize', 5, ...
+                    'MarkerFaceColor', type_colors(ti,:));
+                % 画均值线
+                plot(x_pos + [-0.1, 0.1], [mean(errs), mean(errs)], '-', ...
+                    'Color', type_colors(ti,:)*0.6, 'LineWidth', 2);
+                if bi == 1
+                    legend_h(end+1) = h; %#ok<AGROW>
+                    legend_s{end+1} = type_short{ti}; %#ok<AGROW>
+                end
+            end
+        end
+        hold off;
+        xlabel('频带'); ylabel('定位误差 (m)');
+        title('按源类型分频带误差');
+        set(gca, 'XTick', unique_bands);
+        if ~isempty(legend_h)
+            legend(legend_h, legend_s, 'Location', 'best');
+        end
+        grid on;
+
+        % --- 子图5：误差 vs 事件持续帧数 ---
+        subplot(2, 3, 5);
+        valid_events = EventList(arrayfun(@(ev) ...
+            strcmp(ev.route_action, 'localize_only') || ...
+            strcmp(ev.route_action, 'localize_then_calibrate'), EventList));
+        if numel(valid_events) == numel(valid_lr)
+            durations = [valid_events.duration];
+            scatter(durations, all_errors, 30, all_bands, 'filled');
+            colorbar; clim([0.5 B+0.5]);
+            xlabel('事件持续帧数'); ylabel('定位误差 (m)');
+            title('误差 vs 事件长度 (颜色=频带)');
+            grid on;
+        end
+
+        % --- 子图6：误差 vs 估计功率等级 ---
+        subplot(2, 3, 6);
+        if numel(valid_events) == numel(valid_lr)
+            powers = [valid_events.power_level_est];
+            scatter(powers, all_errors, 30, all_bands, 'filled');
+            colorbar; clim([0.5 B+0.5]);
+            xlabel('事件功率等级 (dBm)'); ylabel('定位误差 (m)');
+            title('误差 vs 功率 (颜色=频带)');
+            grid on;
+        end
+
+        sgtitle('M4 分频带定位误差统计');
+
+        % --- 终端打印详细统计 ---
+        fprintf('\n--- 分频带定位误差详细统计 ---\n');
+        fprintf('  %-6s %-6s %-10s %-10s %-10s %-10s %-10s\n', ...
+            'Band', 'N', 'Mean(m)', 'Median(m)', 'RMSE(m)', 'Max(m)', 'Min(m)');
+        for bi = 1:numel(unique_bands)
+            bb = unique_bands(bi);
+            errs = all_errors(all_bands == bb);
+            fprintf('  %-6d %-6d %-10.2f %-10.2f %-10.2f %-10.2f %-10.2f\n', ...
+                bb, numel(errs), mean(errs), median(errs), ...
+                sqrt(mean(errs.^2)), max(errs), min(errs));
+        end
+        fprintf('  %-6s %-6d %-10.2f %-10.2f %-10.2f %-10.2f %-10.2f\n', ...
+            'ALL', numel(all_errors), mean(all_errors), median(all_errors), ...
+            sqrt(mean(all_errors.^2)), max(all_errors), min(all_errors));
+    end
 end
 
 fprintf('\n============================================\n');

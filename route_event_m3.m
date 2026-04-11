@@ -22,6 +22,13 @@ function EventList = route_event_m3(EventList, Config)
 
     n_events = numel(EventList);
 
+    % 预分配新字段
+    for e = 1:n_events
+        EventList(e).route_action        = '';
+        EventList(e).linked_template_key = '';
+        EventList(e).upgrade_hint        = '';
+    end
+
     route_counts = struct('calibrate_direct', 0, ...
                           'localize_then_calibrate', 0, ...
                           'localize_only', 0, ...

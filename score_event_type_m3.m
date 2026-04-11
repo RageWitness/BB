@@ -18,6 +18,15 @@ function EventList = score_event_type_m3(EventList, Config)
 
     n_events = numel(EventList);
 
+    % 预分配新字段
+    for e = 1:n_events
+        EventList(e).score_trusted    = 0;
+        EventList(e).score_prior_pos  = 0;
+        EventList(e).score_prior_time = 0;
+        EventList(e).score_target     = 0;
+        EventList(e).type_hat         = '';
+    end
+
     for e = 1:n_events
         ev = EventList(e);
 
