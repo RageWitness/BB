@@ -8,7 +8,7 @@ function PL_dB = compute_pathloss_lognormal(dist_m, band_id, ChannelState, Confi
 %
 %   其中 X(m,b) 为阴影项：
 %     若 enableSlowDrift=true  → 使用 ChannelState.shadow_state_dB(:,b)
-%     若 enableSlowDrift=false → 当场生成 i.i.d. N(0, sigma_b^2)
+%     若 enableSlowDrift=false → i.i.d. N(0, sigma_b^2)
 %
 %   输入：
 %       dist_m       - (M x 1) 源到各 AP 距离 (m)
