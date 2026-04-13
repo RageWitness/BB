@@ -17,8 +17,8 @@ fprintf('============================================\n\n');
 %% ========== 1. 一次性初始化 ==========
 
 % --- 场景配置（可调） ---
-ap_override.ap.num_x   = 8;   % 8 x 8 = 64 个 AP
-ap_override.ap.num_y   = 8;
+ap_override.ap.num_x   = 8;   
+ap_override.ap.num_y   = 4;
 ap_override.fp.grid_step = 1;  % 1m 网格（~90000 有效点）
 
 [SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap(ap_override);
@@ -46,7 +46,7 @@ rng_state_after_m0 = rng;
 
 %% ========== 3. n0 扫描 ==========
 
-n0_sweep = -200 : 5 : -80;    % dBm/Hz（扩展到 -80，覆盖极端高噪声）
+n0_sweep = -180 : 4 : -50;    % dBm/Hz: 覆盖全频带 SNR 从 >100dB 到负值
 N_sweep  = numel(n0_sweep);
 
 % 预分配：总体统计
@@ -99,8 +99,8 @@ for si = 1:N_sweep
             ep = estimate_position_wknn_m4(SpatialFP.grid_xy, ni, nw);
 
             err = norm(ep - apb.true_pos_xy);
-            errors_all(end+1) = err; %#ok<AGROW>
-            bands_all(end+1)  = b;   %#ok<AGROW>
+            errors_all(end+1) = err; 
+            bands_all(end+1)  = b;   
         end
     end
 
@@ -131,6 +131,31 @@ fprintf('扫描完成, 耗时 %.1f s\n', toc(sweep_tic));
 
 %% ========== 4. 可视化 ==========
 
+% 预计算各频带的近似 SNR 矩阵 (N_sweep x B)
+snr_approx_all = zeros(N_sweep, B);
+for b = 1:B
+    N_dBm_sweep = n0_sweep + 10*log10(Bands.bw_Hz(b));  % 噪声总功率
+    mean_rx_dBm = mean(SpatialFP.band(b).mean_dBm);     % 库平均接收功率
+    snr_approx_all(:, b) = mean_rx_dBm - N_dBm_sweep';
+end
+
+% 预计算各频带的带宽标签字符串
+bw_labels = cell(1, B);
+for b = 1:B
+    hz = Bands.bw_Hz(b);
+    if hz >= 1e9
+        bw_labels{b} = sprintf('%.1f GHz', hz / 1e9);
+    elseif hz >= 1e6
+        bw_labels{b} = sprintf('%.1f MHz', hz / 1e6);
+    elseif hz >= 1e3
+        bw_labels{b} = sprintf('%.1f kHz', hz / 1e3);
+    else
+        bw_labels{b} = sprintf('%.0f Hz', hz);
+    end
+end
+
+band_colors = lines(B);
+
 % --- 图1：n0 vs 总体误差 ---
 figure('Name', 'n0 vs Localization Error', 'Position', [50 50 900 550]);
 plot(n0_sweep, mean_err,   'o-',  'LineWidth', 2, 'DisplayName', 'Mean');
@@ -146,7 +171,6 @@ title('AWGN 噪声功率谱密度 vs 直接 WKNN 定位误差');
 legend('Location', 'northwest'); grid on;
 
 % --- 图2：n0 vs 分频带 Mean Error ---
-band_colors = lines(B);
 figure('Name', 'Per-band Mean Error vs n0', 'Position', [100 100 900 550]);
 hold on;
 for b = 1:B
@@ -161,23 +185,43 @@ xlabel('n_0 (dBm/Hz)'); ylabel('Mean Error (m)');
 title('分频带 Mean Error vs n_0');
 legend('Location', 'northwest'); grid on;
 
-% --- 图3：n0 vs 分频带 RMSE ---
-figure('Name', 'Per-band RMSE vs n0', 'Position', [150 150 900 550]);
+% --- 图3：SNR vs 分频带 RMSE（以 SNR 为横轴） ---
+figure('Name', 'SNR vs RMSE per band', 'Position', [150 150 900 550]);
 hold on;
 for b = 1:B
     valid = n_samp_band(:, b) > 0;
-    plot(n0_sweep(valid), rmse_err_band(valid, b), 's-', ...
+    plot(snr_approx_all(valid, b), rmse_err_band(valid, b), 's-', ...
+        'Color', band_colors(b,:), 'LineWidth', 2, ...
+        'DisplayName', sprintf('Band %d (%s, BW=%s)', ...
+            b, Bands.name{b}, bw_labels{b}));
+end
+xline(0, 'r--', 'SNR=0 dB', 'LineWidth', 1.5);
+xline(10, 'k:', 'SNR=10 dB', 'LineWidth', 1);
+hold off;
+xlabel('近似 SNR (dB)'); ylabel('RMSE (m)');
+title('各频带 RMSE vs 近似 SNR');
+legend('Location', 'northeast'); grid on;
+set(gca, 'XDir', 'reverse');  % SNR 高在左
+
+% --- 图4：SNR vs 分频带 Mean Error（以 SNR 为横轴） ---
+figure('Name', 'SNR vs Mean Error per band', 'Position', [200 200 900 550]);
+hold on;
+for b = 1:B
+    valid = n_samp_band(:, b) > 0;
+    plot(snr_approx_all(valid, b), mean_err_band(valid, b), 'o-', ...
         'Color', band_colors(b,:), 'LineWidth', 2, ...
         'DisplayName', sprintf('Band %d (%s)', b, Bands.name{b}));
 end
-xline(-174, 'k--', 'thermal', 'LineWidth', 1.5);
+xline(0, 'r--', 'SNR=0 dB', 'LineWidth', 1.5);
+xline(10, 'k:', 'SNR=10 dB', 'LineWidth', 1);
 hold off;
-xlabel('n_0 (dBm/Hz)'); ylabel('RMSE (m)');
-title('分频带 RMSE vs n_0');
-legend('Location', 'northwest'); grid on;
+xlabel('近似 SNR (dB)'); ylabel('Mean Error (m)');
+title('各频带 Mean Error vs 近似 SNR');
+legend('Location', 'northeast'); grid on;
+set(gca, 'XDir', 'reverse');
 
-% --- 图4：双轴图 — 误差 + 近似 SNR ---
-figure('Name', 'Error & SNR vs n0', 'Position', [200 200 1200 500]);
+% --- 图5：分频带双轴图 — 误差 + SNR vs n0 ---
+figure('Name', 'Error & SNR vs n0', 'Position', [250 100 1400 500]);
 for b = 1:B
     subplot(1, B, b);
     valid = n_samp_band(:, b) > 0;
@@ -187,17 +231,14 @@ for b = 1:B
     plot(n0_sweep(valid), mean_err_band(valid, b), 'o-', 'LineWidth', 1.5);
     ylabel('Mean Error (m)');
 
-    % 右轴：近似 SNR（轴方向翻转，SNR 高在上）
+    % 右轴：SNR
     yyaxis right;
-    N_dBm_sweep = n0_sweep + 10*log10(Bands.bw_Hz(b));
-    mean_rx_dBm = mean(SpatialFP.band(b).mean_dBm);
-    snr_approx  = mean_rx_dBm - N_dBm_sweep;
-    plot(n0_sweep, snr_approx, 's--', 'LineWidth', 1.5);
+    plot(n0_sweep, snr_approx_all(:, b), 's--', 'LineWidth', 1.5);
     ylabel('Approx SNR (dB)');
-    set(gca, 'YDir', 'reverse');  % SNR 高在上（n0 小端）
+    yline(0, 'r:', 'SNR=0');
 
     xlabel('n_0 (dBm/Hz)');
-    title(sprintf('Band %d (%s)', b, Bands.name{b}));
+    title(sprintf('Band %d (%s, BW=%s)', b, Bands.name{b}, bw_labels{b}));
     grid on;
 end
 sgtitle('误差 & 近似 SNR vs n_0');
@@ -213,3 +254,4 @@ for si = 1:N_sweep
         median_err(si), p90_err(si), n_samp(si));
 end
 fprintf('\n');
+

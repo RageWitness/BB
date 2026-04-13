@@ -51,7 +51,7 @@ function Config = fill_m1_defaults(Config)
 
     % --- 信道模型选择 ---
     if ~isfield(Config.m1, 'channel') || ~isfield(Config.m1.channel, 'model_per_band')
-        Config.m1.channel.model_per_band = {'lognormal', 'lognormal', 'cost231wi', 'cost231wi'};
+        Config.m1.channel.model_per_band = {'lognormal', 'lognormal', 'lognormal', 'lognormal'};
     end
 
     % --- lognormal 参数 ---
