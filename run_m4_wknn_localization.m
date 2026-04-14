@@ -69,27 +69,70 @@ function LocResults = run_m4_wknn_localization( ...
         %% a. 聚合事件指纹（含形状向量）
         [F_obs_lin, F_obs_shape] = aggregate_event_fingerprint_m4(ev);
 
-        %% b. 形状+缩放距离计算
+        %% b. 全库形状距离（仅 d_shape，用于 Area Screening 预候选）
         match_cfg = struct();
         match_cfg.lambda_shape = m4cfg.lambda_shape;
         match_cfg.lambda_resid = m4cfg.lambda_resid;
-        [D_vec, d_shape_vec, resid_vec, q_opt_vec] = ...
-            compute_wknn_distance_shape_scale( ...
-                F_obs_lin, F_obs_shape, SpatialFP.band(b), match_cfg);
 
-        %% c. 选 K 近邻
-        [neighbor_idx, neighbor_dist, weights] = select_knn_neighbors_m4( ...
-            D_vec, m4cfg.K, m4cfg.eps_val);
+        F_lib_shape = SpatialFP.band(b).F_shape_l1;            % M x G
+        diff_shape  = F_obs_shape - F_lib_shape;                % M x G
+        d_shape_vec_full = sqrt(sum(diff_shape.^2, 1));         % 1 x G
+
+        %% c. Area Screening — 空间一致性筛选
+        scr = screen_candidates_by_area_m4( ...
+            d_shape_vec_full, SpatialFP.grid_xy, m4cfg.area_screening);
+
+        if scr.screen_applied
+            %% —— 筛选生效：仅对 valid 候选计算 q_g*, resid, D ——
+            vidx = scr.valid_idx;                               % 通过筛选的网格索引
+
+            % 构造子集指纹库
+            sub_fp = struct();
+            sub_fp.F_lin      = SpatialFP.band(b).F_lin(:, vidx);
+            sub_fp.F_shape_l1 = SpatialFP.band(b).F_shape_l1(:, vidx);
+
+            [D_sub, d_shape_sub, resid_sub, q_opt_sub] = ...
+                compute_wknn_distance_shape_scale( ...
+                    F_obs_lin, F_obs_shape, sub_fp, match_cfg);
+
+            % 最终 K 近邻数
+            K_final = min(m4cfg.area_screening.k_final, numel(vidx));
+
+            [nn_local_idx, nn_dist, nn_weights] = select_knn_neighbors_m4( ...
+                D_sub, K_final, m4cfg.eps_val);
+
+            % 映射回全局索引
+            neighbor_idx  = vidx(nn_local_idx);
+            neighbor_dist = nn_dist;
+            weights       = nn_weights;
+
+            % 还原全库向量（用于诊断记录）
+            G = numel(d_shape_vec_full);
+            d_shape_vec = d_shape_vec_full;
+            q_opt_vec   = zeros(1, G);  q_opt_vec(vidx)   = q_opt_sub;
+            resid_vec   = inf(1, G);    resid_vec(vidx)    = resid_sub;
+            D_vec       = inf(1, G);    D_vec(vidx)        = D_sub;
+
+        else
+            %% —— 回退到原始全库逻辑 ——
+            [D_vec, d_shape_vec, resid_vec, q_opt_vec] = ...
+                compute_wknn_distance_shape_scale( ...
+                    F_obs_lin, F_obs_shape, SpatialFP.band(b), match_cfg);
+
+            [neighbor_idx, neighbor_dist, weights] = select_knn_neighbors_m4( ...
+                D_vec, m4cfg.K, m4cfg.eps_val);
+        end
 
         %% d. 加权位置估计
         est_pos_xy = estimate_position_wknn_m4( ...
             SpatialFP.grid_xy, neighbor_idx, weights);
 
-        %% e. 记录结果（含诊断信息）
+        %% e. 记录结果（含诊断信息 + Area Screening 诊断）
         extra_info = struct();
         extra_info.q_opt_vec   = q_opt_vec;
         extra_info.d_shape_vec = d_shape_vec;
         extra_info.resid_vec   = resid_vec;
+        extra_info.area_scr    = scr;
 
         lr = record_loc_results_m4(ev, est_pos_xy, F_obs_lin, ...
             neighbor_idx, neighbor_dist, weights, FrameStates, Config, extra_info);
@@ -116,7 +159,7 @@ end
 %% ==================== 局部函数 ====================
 
 function cfg = fill_m4_defaults(Config)
-% FILL_M4_DEFAULTS  填充 M4 默认参数
+% FILL_M4_DEFAULTS  填充 M4 默认参数（含 Area Screening）
 
     if isfield(Config, 'm4')
         m4 = Config.m4;
@@ -149,6 +192,28 @@ function cfg = fill_m4_defaults(Config)
     else
         cfg.lambda_resid = 0.3;
     end
+
+    % ---- Area Screening 默认参数 ----
+    as_defaults = struct();
+    as_defaults.enable       = true;
+    as_defaults.k_shape      = 5;
+    as_defaults.k_final      = 6;
+    as_defaults.r_min_m      = 8;
+    as_defaults.alpha        = 1.5;
+    as_defaults.r_max_m      = 15;
+    as_defaults.d_pair_max_m = 40;
+    as_defaults.k_min_valid  = 2;
+
+    if isfield(m4, 'area_screening')
+        as_in = m4.area_screening;
+        fns = fieldnames(as_defaults);
+        for i = 1:numel(fns)
+            if isfield(as_in, fns{i})
+                as_defaults.(fns{i}) = as_in.(fns{i});
+            end
+        end
+    end
+    cfg.area_screening = as_defaults;
 end
 
 

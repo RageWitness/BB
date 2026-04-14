@@ -84,6 +84,40 @@ function loc_result = record_loc_results_m4(event, est_pos_xy, F_obs, ...
         loc_result.d_shape_neighbors = [];
         loc_result.resid_neighbors   = [];
     end
+
+    % ---- Area Screening 诊断字段（所有坐标/距离均为物理空间量） ----
+    if nargin >= 9 && ~isempty(extra_info) && isfield(extra_info, 'area_scr')
+        as = extra_info.area_scr;
+        loc_result.area_screening_enabled         = true;
+        loc_result.area_screening_applied         = as.screen_applied;
+        loc_result.area_screening_fallback_used   = as.fallback_used;
+        loc_result.area_screening_fallback_reason = as.fallback_reason;
+        loc_result.area_screening_center_xy       = as.center_xy_phys;
+        loc_result.area_screening_radius_m        = as.radius_phys_m;
+        loc_result.area_screening_pair_dist12_m   = as.pair_dist12_phys_m;
+        loc_result.area_screening_candidate_xy    = as.pre_xy_phys;
+        loc_result.area_screening_candidate_dist_to_center_m = as.dist_to_center_phys_m;
+        loc_result.area_screening_pre_idx_shape   = as.pre_idx_shape;
+        loc_result.area_screening_pre_dist_shape  = as.pre_dist_shape;
+        loc_result.area_screening_valid_idx       = as.valid_idx;
+        loc_result.area_screening_rejected_idx    = as.rejected_idx;
+        loc_result.area_screening_valid_count     = as.valid_count;
+    else
+        loc_result.area_screening_enabled         = false;
+        loc_result.area_screening_applied         = false;
+        loc_result.area_screening_fallback_used   = false;
+        loc_result.area_screening_fallback_reason = '';
+        loc_result.area_screening_center_xy       = [NaN, NaN];
+        loc_result.area_screening_radius_m        = NaN;
+        loc_result.area_screening_pair_dist12_m   = NaN;
+        loc_result.area_screening_candidate_xy    = [];
+        loc_result.area_screening_candidate_dist_to_center_m = [];
+        loc_result.area_screening_pre_idx_shape   = [];
+        loc_result.area_screening_pre_dist_shape  = [];
+        loc_result.area_screening_valid_idx       = [];
+        loc_result.area_screening_rejected_idx    = [];
+        loc_result.area_screening_valid_count     = 0;
+    end
 end
 
 
