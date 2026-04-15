@@ -1,9 +1,10 @@
-function [rss_dBm, rss_lin, rss_std_dBm, rss_std_lin] = simulate_reference_fp_point_m1bridge( ...
+function [rss_dBm, rss_lin, rss_std_dBm, rss_std_lin, rss_lin_samples] = simulate_reference_fp_point_m1bridge( ...
     grid_pos_xy, band_id, ref_power_dBm, APs, Bands, Config)
 % SIMULATE_REFERENCE_FP_POINT_M1BRIDGE  在参考点生成名义 RSS 指纹
 %
 %   [rss_dBm, rss_lin] = simulate_reference_fp_point_m1bridge(...)
 %   [rss_dBm, rss_lin, rss_std_dBm, rss_std_lin] = simulate_reference_fp_point_m1bridge(...)
+%   [rss_dBm, rss_lin, rss_std_dBm, rss_std_lin, rss_lin_samples] = simulate_reference_fp_point_m1bridge(...)
 %
 %   对 lognormal 频带：N_mc 次 Monte Carlo（含 i.i.d. 阴影），
 %   取线性域均值作为指纹，同时输出 dBm 域和线性域标准差。
@@ -16,10 +17,12 @@ function [rss_dBm, rss_lin, rss_std_dBm, rss_std_lin] = simulate_reference_fp_po
 %       APs, Bands, Config
 %
 %   输出：
-%       rss_dBm     - (M x 1) RSS 均值 (dBm)
-%       rss_lin     - (M x 1) RSS 均值 (线性 mW)
-%       rss_std_dBm - (M x 1) RSS 标准差 (dB)
-%       rss_std_lin - (M x 1) RSS 标准差 (线性 mW)
+%       rss_dBm         - (M x 1) RSS 均值 (dBm)
+%       rss_lin         - (M x 1) RSS 均值 (线性 mW)
+%       rss_std_dBm     - (M x 1) RSS 标准差 (dB)
+%       rss_std_lin     - (M x 1) RSS 标准差 (线性 mW)
+%       rss_lin_samples - (M x N_mc) 线性功率 MC 样本（可选第5输出）
+%                         cost231wi 模型无 MC，返回 (M x 1) 确定性值
 
     b = band_id;
     M = APs.num;
@@ -38,6 +41,7 @@ function [rss_dBm, rss_lin, rss_std_dBm, rss_std_lin] = simulate_reference_fp_po
             rss_lin     = 10.^(rss_dBm / 10);
             rss_std_dBm = zeros(M, 1);
             rss_std_lin = zeros(M, 1);
+            rss_lin_samples = rss_lin;  % 确定性，无 MC 样本
 
         case 'lognormal'
             N_mc = 50;

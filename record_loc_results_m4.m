@@ -85,6 +85,51 @@ function loc_result = record_loc_results_m4(event, est_pos_xy, F_obs, ...
         loc_result.resid_neighbors   = [];
     end
 
+    % ---- 概率 shape / HN 诊断字段 ----
+    if nargin >= 9 && ~isempty(extra_info) && isfield(extra_info, 'distance_mode')
+        loc_result.distance_mode = extra_info.distance_mode;
+    else
+        loc_result.distance_mode = 'shape_scale';
+    end
+
+    % preselect 索引（HN 模式）
+    if nargin >= 9 && ~isempty(extra_info) && isfield(extra_info, 'preselect_idx')
+        loc_result.preselect_idx = extra_info.preselect_idx;
+    else
+        loc_result.preselect_idx = [];
+    end
+
+    has_pi = nargin >= 9 && ~isempty(extra_info) && isfield(extra_info, 'prob_info') ...
+             && ~isempty(fieldnames(extra_info.prob_info));
+
+    % prob 模式诊断
+    if has_pi && isfield(extra_info.prob_info, 's_obs_weighted')
+        pi = extra_info.prob_info;
+        loc_result.prob_s_obs_weighted    = pi.s_obs_weighted;
+        loc_result.prob_ap_weight_used    = pi.ap_weight_used;
+        loc_result.prob_d_shape_neighbors = pi.d_shape_prob_vec(neighbor_idx);
+        loc_result.prob_resid_neighbors   = pi.resid_prob_vec(neighbor_idx);
+    else
+        loc_result.prob_s_obs_weighted    = [];
+        loc_result.prob_ap_weight_used    = [];
+        loc_result.prob_d_shape_neighbors = [];
+        loc_result.prob_resid_neighbors   = [];
+    end
+
+    % HN 模式诊断
+    if has_pi && isfield(extra_info.prob_info, 'd_shape_hn_vec')
+        hi = extra_info.prob_info;
+        loc_result.hn_d_shape_neighbors   = hi.d_shape_hn_vec(neighbor_idx);
+        loc_result.hn_resid_prob_neighbors = hi.resid_prob_vec(neighbor_idx);
+        loc_result.hn_d_neg_min_neighbors = hi.d_neg_min_vec(neighbor_idx);
+        loc_result.hn_p_hn_neighbors      = hi.p_hn_vec(neighbor_idx);
+    else
+        loc_result.hn_d_shape_neighbors   = [];
+        loc_result.hn_resid_prob_neighbors = [];
+        loc_result.hn_d_neg_min_neighbors = [];
+        loc_result.hn_p_hn_neighbors      = [];
+    end
+
     % ---- Area Screening 诊断字段（所有坐标/距离均为物理空间量） ----
     if nargin >= 9 && ~isempty(extra_info) && isfield(extra_info, 'area_scr')
         as = extra_info.area_scr;
