@@ -271,55 +271,35 @@ end
 sgtitle(sprintf('M2.5 指纹库: 网格点放信源(ref=%d dBm), 16AP 平均接收 RSS', ...
     SpatialFP.ref_power_dBm(1)));
 
-% ===== 图6：M3 事件分类时间线 =====
+% ===== 图6：M3 事件分类时间线（与图1对齐的 imagesc 风格） =====
 if ~isempty(EventList)
-    figure('Name', 'M3 事件分类', 'Position', [50 50 1200 400]);
+    figure('Name', 'M3 事件分类', 'Position', [50 50 1200 350]);
 
-    type_color_map = struct( ...
-        'trusted_fixed',    [0.2 0.6 1], ...
-        'prior_pos_known',  [0 0.8 0.4], ...
-        'prior_time_known', [1 0.7 0], ...
-        'ordinary_target',  [0.9 0.2 0.2]);
-    hold on;
+    % 构建 T x B 矩阵：0=空闲, 1=trusted, 2=prior_pos, 3=prior_time, 4=target
+    m3_matrix = zeros(T, B);
     for e = 1:numel(EventList)
         ev = EventList(e);
-        y_pos = ev.band_id;
+        frames = ev.t_start:ev.t_end;
         switch ev.type_hat
-            case 'trusted_fixed',    clr = [0.2 0.6 1];
-            case 'prior_pos_known',  clr = [0 0.8 0.4];
-            case 'prior_time_known', clr = [1 0.7 0];
-            case 'ordinary_target',  clr = [0.9 0.2 0.2];
-            otherwise,               clr = [0.5 0.5 0.5];
+            case 'trusted_fixed',    val = 1;
+            case 'prior_pos_known',  val = 2;
+            case 'prior_time_known', val = 3;
+            case 'ordinary_target',  val = 4;
+            otherwise,               val = 0;
         end
-        % 画水平条
-        patch([ev.t_start, ev.t_end, ev.t_end, ev.t_start], ...
-              [y_pos-0.35, y_pos-0.35, y_pos+0.35, y_pos+0.35], ...
-              clr, 'EdgeColor', clr*0.7, 'FaceAlpha', 0.8);
+        m3_matrix(frames, ev.band_id) = val;
     end
-    hold off;
+
+    imagesc(1:T, 1:B, m3_matrix');
+    colormap(gca, cmap);
+    clim([0 4]);
+    cbar6 = colorbar;
+    cbar6.Ticks = [0, 1, 2, 3, 4];
+    cbar6.TickLabels = type_names;
     xlabel('帧号'); ylabel('频带');
     title('M3 事件分类时间线');
     set(gca, 'YTick', 1:B);
-    ylim([0.5, B+0.5]);
-    xlim([1, T]);
     grid on;
-
-    % 图例
-    legend_entries = {};
-    legend_handles = [];
-    for type_cell = {'trusted_fixed', 'prior_pos_known', 'prior_time_known', 'ordinary_target'}
-        tn = type_cell{1};
-        switch tn
-            case 'trusted_fixed',    clr = [0.2 0.6 1];
-            case 'prior_pos_known',  clr = [0 0.8 0.4];
-            case 'prior_time_known', clr = [1 0.7 0];
-            case 'ordinary_target',  clr = [0.9 0.2 0.2];
-        end
-        h = patch(NaN, NaN, clr, 'FaceAlpha', 0.8);
-        legend_handles(end+1) = h; %#ok<AGROW>
-        legend_entries{end+1} = strrep(tn, '_', '\_'); %#ok<AGROW>
-    end
-    legend(legend_handles, legend_entries, 'Location', 'best');
 end
 
 % ===== 图7：M4 定位结果散点图 =====

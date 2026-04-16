@@ -110,6 +110,16 @@ function Config = default_config_m0()
     Config.m3.relative_power.topk = 3;
     Config.m3.relative_power.tau_valid_ap_dB = 3;
 
+    % --- M3 trusted / ordinary 门限配置 ---
+    Config.m3.trusted.min_active_bands = 3;
+    Config.m3.trusted.min_power_excess_dB = 8;
+    Config.m3.trusted.max_power_jitter_dB = 3;
+    Config.m3.trusted.min_position_score = 0.7;
+    Config.m3.trusted.max_position_spread = 15;
+
+    Config.m3.ordinary.min_duration_frames = 3;
+    Config.m3.ordinary.min_valid_ap = 2;
+
     % --- M4 掩码 shape 配置 ---
     Config.m4.distance_mode = 'shape_scale_masked'; % 可选: shape_scale/shape_scale_prob/shape_scale_hn
     Config.m4.masked_shape.enable = true;
