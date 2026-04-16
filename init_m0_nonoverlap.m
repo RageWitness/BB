@@ -114,12 +114,15 @@ function Config = default_config_m0()
     Config.m3.relative_power.topk = 3;
     Config.m3.relative_power.tau_valid_ap_dB = 3;
 
-    % --- M3 trusted hard gate ---
-    Config.m3.trusted.min_active_bands = 3;
-    Config.m3.trusted.min_power_z = 1.5;
-    Config.m3.trusted.max_power_jitter_dB = 3;
-    Config.m3.trusted.min_position_score = 0.70;
-    Config.m3.trusted.max_position_spread_m = 10;
+    % --- M3 trusted hard gate (linear-domain, all-band all-AP) ---
+    Config.m3.trusted_hard.enable = true;
+    Config.m3.trusted_hard.power_threshold_lin = 1e5;
+    Config.m3.trusted_hard.require_all_bands = true;
+    Config.m3.trusted_hard.require_all_aps = true;
+    Config.m3.trusted_hard.min_duration_frames = 2;
+    Config.m3.trusted_hard.aggregation = 'mean';  % mean | median | min
+    Config.m3.trusted_hard.mode = 'strict';       % strict | fraction
+    Config.m3.trusted_hard.min_fraction = 0.95;   % used in fraction mode
 
     % --- M3 prior gate ---
     Config.m3.prior_pos.min_position_score = 0.60;
@@ -127,10 +130,15 @@ function Config = default_config_m0()
     Config.m3.prior_time.min_time_score = 0.60;
     Config.m3.prior_time.min_margin = 0.10;
 
-    % --- M3 ordinary fallback ---
-    Config.m3.ordinary.min_detect_z = 0.8;
+    % --- M3 ordinary fallback (线性域) ---
+    Config.m3.ordinary.min_ratio_sum       = 3;
+    Config.m3.ordinary.min_ratio_top1      = 5;
+    Config.m3.ordinary.min_valid_ap        = 2;
     Config.m3.ordinary.min_duration_frames = 3;
-    Config.m3.ordinary.min_valid_ap = 2;
+
+    % --- M3 线性域功率特征 ---
+    Config.m3.linear_power.topk        = 3;
+    Config.m3.linear_power.alpha_noise = 2;
 
     % --- M3 route ---
     Config.m3.route.hold_enable = true;

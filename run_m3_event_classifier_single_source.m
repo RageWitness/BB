@@ -357,8 +357,19 @@ function EventList = backfill_group_results_m3(EventFeatList, GroupList)
         EventList(e).second_best_time_score = 0;
         EventList(e).trusted_gate_flags = struct();
         EventList(e).trusted_subscores = struct();
+        EventList(e).trusted_candidate_flag = false;
+        EventList(e).trusted_hard_pass = false;
+        EventList(e).trusted_hard_min_power_lin = NaN;
+        EventList(e).trusted_hard_power_matrix_lin = [];
+        EventList(e).trusted_hard_active_band_count = 0;
+        EventList(e).trusted_hard_duration_frames = 0;
+        EventList(e).trusted_hard_removed_from_scoring = false;
         EventList(e).pos_margin = 0;
         EventList(e).time_margin = 0;
+        EventList(e).ratio_sum_lin_per_band = [];
+        EventList(e).ratio_top1_lin_per_band = [];
+        EventList(e).ratio_topK_lin_per_band = [];
+        EventList(e).n_valid_ap_lin_per_band = [];
     end
 
     for g = 1:numel(GroupList)
@@ -400,8 +411,20 @@ function EventList = backfill_group_results_m3(EventFeatList, GroupList)
             EventList(eidx).second_best_time_score = get_field_default(grp, 'second_best_time_score', 0);
             EventList(eidx).trusted_gate_flags = get_field_default(grp, 'trusted_gate_flags', struct());
             EventList(eidx).trusted_subscores = get_field_default(grp, 'trusted_subscores', struct());
+            EventList(eidx).trusted_candidate_flag = get_field_default(grp, 'trusted_candidate_flag', false);
+            EventList(eidx).trusted_hard_pass = get_field_default(grp, 'trusted_hard_pass', false);
+            EventList(eidx).trusted_hard_min_power_lin = get_field_default(grp, 'trusted_hard_min_power_lin', NaN);
+            EventList(eidx).trusted_hard_power_matrix_lin = get_field_default(grp, 'trusted_hard_power_matrix_lin', []);
+            EventList(eidx).trusted_hard_active_band_count = get_field_default(grp, 'trusted_hard_active_band_count', 0);
+            EventList(eidx).trusted_hard_duration_frames = get_field_default(grp, 'trusted_hard_duration_frames', 0);
+            EventList(eidx).trusted_hard_removed_from_scoring = ...
+                get_field_default(grp, 'trusted_hard_removed_from_scoring', false);
             EventList(eidx).pos_margin = get_field_default(grp, 'pos_margin', 0);
             EventList(eidx).time_margin = get_field_default(grp, 'time_margin', 0);
+            EventList(eidx).ratio_sum_lin_per_band = get_field_default(grp, 'ratio_sum_lin_per_band', []);
+            EventList(eidx).ratio_top1_lin_per_band = get_field_default(grp, 'ratio_top1_lin_per_band', []);
+            EventList(eidx).ratio_topK_lin_per_band = get_field_default(grp, 'ratio_topK_lin_per_band', []);
+            EventList(eidx).n_valid_ap_lin_per_band = get_field_default(grp, 'n_valid_ap_lin_per_band', []);
         end
     end
 end

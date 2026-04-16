@@ -15,10 +15,14 @@ function EventList = extract_event_features_m3(EventListRaw, Y_dBm_all, Y_lin_al
     % 填充默认参数
     feat_cfg = fill_feat_defaults(Config);
 
+    % 线性域配置
+    lp_cfg = fill_linear_power_defaults(Config);
+
     % 先为所有事件预分配字段（MATLAB struct 数组要求字段一致）
     for e = 1:n_events
         EventListRaw(e).power_level_est            = 0;
         EventListRaw(e).power_stability_est        = 0;
+        EventListRaw(e).power_stability_lin        = 0;
         EventListRaw(e).band_coverage_vec          = zeros(1, B);
         EventListRaw(e).schedule_match_score       = 0;
         EventListRaw(e).position_prior_match_score = 0;
@@ -27,6 +31,14 @@ function EventList = extract_event_features_m3(EventListRaw, Y_dBm_all, Y_lin_al
         EventListRaw(e).power_excess_topk_dB       = 0;
         EventListRaw(e).n_valid_ap                 = 0;
         EventListRaw(e).noise_floor_dBm            = 0;
+        EventListRaw(e).energy_sum_lin             = 0;
+        EventListRaw(e).energy_top1_lin            = 0;
+        EventListRaw(e).energy_topK_lin            = 0;
+        EventListRaw(e).n_valid_ap_lin             = 0;
+        EventListRaw(e).noise_floor_lin            = 0;
+        EventListRaw(e).ratio_sum_lin              = 0;
+        EventListRaw(e).ratio_top1_lin             = 0;
+        EventListRaw(e).ratio_topK_lin             = 0;
         EventListRaw(e).feat_vec                   = [];
     end
     EventList = EventListRaw;
@@ -80,12 +92,49 @@ function EventList = extract_event_features_m3(EventListRaw, Y_dBm_all, Y_lin_al
         ex_sorted = sort(excess_dB, 'descend');
         ev.power_excess_topk_dB = mean(ex_sorted(1:k_use));
 
-        %% 7) 组合特征向量（旧 + 新）
+        %% 7) 线性域功率特征（新增）
+        if ev.duration > 1
+            y_lin_mean = mean(ev.obs_segment_lin, 2);  % M x 1
+        else
+            y_lin_mean = ev.obs_segment_lin(:);
+        end
+        nf_lin = 10^(noise_floor_dBm(1) / 10);  % 标量噪声底（线性 mW）
+        nf_lin = max(nf_lin, 1e-30);
+        ev.noise_floor_lin = nf_lin;
+
+        % 有效 AP：线性功率 > alpha_noise * noise_floor
+        valid_lin_mask = y_lin_mean > (lp_cfg.alpha_noise * nf_lin);
+        ev.n_valid_ap_lin = sum(valid_lin_mask);
+
+        y_valid = y_lin_mean(valid_lin_mask);
+        ev.energy_sum_lin = sum(y_valid);
+        ev.energy_top1_lin = max(y_lin_mean);
+
+        K_use = min(lp_cfg.topk, numel(y_lin_mean));
+        y_sorted = sort(y_lin_mean, 'descend');
+        ev.energy_topK_lin = sum(y_sorted(1:K_use));
+
+        N_eff = max(ev.n_valid_ap_lin, 1);
+        ev.ratio_sum_lin  = ev.energy_sum_lin / (nf_lin * N_eff);
+        ev.ratio_top1_lin = ev.energy_top1_lin / nf_lin;
+        ev.ratio_topK_lin = ev.energy_topK_lin / (nf_lin * K_use);
+
+        % 线性域功率稳定性（帧间方差 / 帧间均值）
+        if ev.duration > 1
+            frame_energy = sum(ev.obs_segment_lin, 1);  % 1 x L
+            ev.power_stability_lin = var(frame_energy) / (mean(frame_energy)^2 + 1e-30);
+        else
+            ev.power_stability_lin = 0;
+        end
+
+        %% 8) 组合特征向量（旧 + 新）
         ev.feat_vec = [ev.power_level_est, ev.power_stability_est, L, ...
                        ev.band_coverage_vec, ...
                        ev.schedule_match_score, ev.position_prior_match_score, ...
                        ev.power_excess_mean_dB, ev.power_excess_top1_dB, ...
-                       ev.power_excess_topk_dB, ev.n_valid_ap];
+                       ev.power_excess_topk_dB, ev.n_valid_ap, ...
+                       ev.ratio_sum_lin, ev.ratio_top1_lin, ev.ratio_topK_lin, ...
+                       ev.n_valid_ap_lin];
 
         EventList(e) = ev;
     end
@@ -346,4 +395,17 @@ function noise_floor_dBm = get_noise_floor_dBm_for_band_m3(Config, band_id, M)
 
     nf = n0 + 10 * log10(bw_hz);
     noise_floor_dBm = repmat(nf, M, 1);
+end
+
+
+function cfg = fill_linear_power_defaults(Config)
+% FILL_LINEAR_POWER_DEFAULTS  线性域功率特征参数
+    cfg.topk = 3;
+    cfg.alpha_noise = 2;
+
+    if isfield(Config, 'm3') && isfield(Config.m3, 'linear_power')
+        lp = Config.m3.linear_power;
+        if isfield(lp, 'topk'),       cfg.topk = lp.topk; end
+        if isfield(lp, 'alpha_noise'), cfg.alpha_noise = lp.alpha_noise; end
+    end
 end
