@@ -11,14 +11,6 @@ function [SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_no
 %     4. 构建三类信源模板库
 %     5. 初始化运行时状态
 %     6. 初始化真值日志
-%
-%   输出：
-%       SourceTemplates - 模板库
-%       M0State         - 运行时状态
-%       M0Logs          - 真值日志（初始为空）
-%       GridValid       - 有效网格
-%       Config          - 完整配置
-%       APs             - AP 信息
 
     %% ===== 1. 默认配置 =====
     Config = default_config_m0();
@@ -112,6 +104,20 @@ function Config = default_config_m0()
                                         50, 65;   ... % band 3
                                         50, 65];      % band 4
     Config.m0.target.position_mode   = 'uniform';       % 'uniform' 或 'hotspot'
+
+    % --- M3 相对功率特征配置 ---
+    Config.m3.relative_power.enable = true;
+    Config.m3.relative_power.topk = 3;
+    Config.m3.relative_power.tau_valid_ap_dB = 3;
+
+    % --- M4 掩码 shape 配置 ---
+    Config.m4.distance_mode = 'shape_scale_masked'; % 可选: shape_scale/shape_scale_prob/shape_scale_hn
+    Config.m4.masked_shape.enable = true;
+    Config.m4.masked_shape.tau_low_dB = 3;
+    Config.m4.masked_shape.tau_high_dB = 10;
+    Config.m4.masked_shape.eps = 1e-12;
+    Config.m4.lambda_shape = 0.7;
+    Config.m4.lambda_resid = 0.3;
 end
 
 

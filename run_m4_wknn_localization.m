@@ -2,10 +2,11 @@ function LocResults = run_m4_wknn_localization( ...
     EventList, SpatialFP, FrameStates, Config)
 % RUN_M4_WKNN_LOCALIZATION  M4 模块总入口 — WKNN 定位
 %
-%   支持三种距离模式：
-%     'shape_scale'       — 原始 shape+resid
-%     'shape_scale_prob'  — 全局 AP 权重 + 概率 shape
-%     'shape_scale_hn'    — 局部 hard-negative AP 权重 + 排斥项
+%   支持四种距离模式：
+%     'shape_scale'         - 原始 shape+resid
+%     'shape_scale_prob'    - 全局 AP 权重 + 概率 shape
+%     'shape_scale_hn'      - 局部 hard-negative AP 权重 + 排斥项
+%     'shape_scale_masked'  - 可靠 AP 掩码下的 shape+resid
 
     fprintf('\n============================================\n');
     fprintf('  M4 WKNN 定位模块\n');
@@ -44,9 +45,9 @@ function LocResults = run_m4_wknn_localization( ...
         b  = ev.band_id;
 
         %% a. 聚合事件指纹
-        [F_obs_lin, F_obs_shape] = aggregate_event_fingerprint_m4(ev);
+        [F_obs_lin, F_obs_shape, F_obs_dBm] = aggregate_event_fingerprint_m4(ev);
 
-        %% b. 全库 d_shape（用于 Area Screening 和预筛）
+        %% b. 全库 d_shape（用于 Area Screening 和诊断）
         F_lib_shape = SpatialFP.band(b).F_shape_l1;
         diff_shape  = F_obs_shape - F_lib_shape;
         d_shape_vec_full = sqrt(sum(diff_shape.^2, 1));   % 1 x G
@@ -57,12 +58,25 @@ function LocResults = run_m4_wknn_localization( ...
 
         %% d. 构建 match_cfg
         match_cfg = struct();
-        match_cfg.distance_mode  = m4cfg.distance_mode;
-        match_cfg.lambda_shape   = m4cfg.lambda_shape;
-        match_cfg.lambda_resid   = m4cfg.lambda_resid;
-        match_cfg.lambda_hn      = m4cfg.lambda_hn;
+        match_cfg.distance_mode   = m4cfg.distance_mode;
+        match_cfg.lambda_shape    = m4cfg.lambda_shape;
+        match_cfg.lambda_resid    = m4cfg.lambda_resid;
+        match_cfg.lambda_hn       = m4cfg.lambda_hn;
         match_cfg.hn_delta_margin = m4cfg.hn_delta_margin;
-        match_cfg.prob_eps       = m4cfg.prob_eps;
+        match_cfg.prob_eps        = m4cfg.prob_eps;
+        match_cfg.masked_shape    = m4cfg.masked_shape;
+        match_cfg.F_obs_dBm       = F_obs_dBm;
+
+        [noise_floor_dBm, nf_ok, nf_msg] = get_noise_floor_dBm_for_band( ...
+            Config, b, numel(F_obs_lin));
+        if nf_ok
+            match_cfg.noise_floor_dBm = noise_floor_dBm;
+        else
+            match_cfg.noise_floor_dBm = [];
+            if strcmp(m4cfg.distance_mode, 'shape_scale_masked')
+                fprintf('[M4] 警告: masked 模式噪声底缺失，自动回退原始距离 (%s)\n', nf_msg);
+            end
+        end
 
         %% e. 距离计算（分模式）
         if strcmp(m4cfg.distance_mode, 'shape_scale_hn')
@@ -72,30 +86,40 @@ function LocResults = run_m4_wknn_localization( ...
                 run_hn_pipeline(F_obs_lin, F_obs_shape, SpatialFP.band(b), ...
                     d_shape_vec_full, scr, m4cfg, match_cfg);
         else
-            % ---- 原始 / prob 模式 ----
+            % ---- 原始 / prob / masked 模式 ----
             preselect_idx = [];
             if scr.screen_applied
                 vidx = scr.valid_idx;
                 sub_fp = extract_band_subset(SpatialFP.band(b), vidx, m4cfg.distance_mode);
-                [D_sub, ~, resid_sub, q_opt_sub, prob_info_sub] = ...
+                [D_sub, d_shape_sub, resid_sub, q_opt_sub, prob_info_sub] = ...
                     compute_wknn_distance_shape_scale( ...
                         F_obs_lin, F_obs_shape, sub_fp, match_cfg);
+
                 K_final = min(m4cfg.area_screening.k_final, numel(vidx));
                 [nn_local, nn_dist, nn_w] = select_knn_neighbors_m4( ...
                     D_sub, K_final, m4cfg.eps_val);
                 neighbor_idx  = vidx(nn_local);
                 neighbor_dist = nn_dist;
                 weights       = nn_w;
+
                 G = numel(d_shape_vec_full);
                 d_shape_vec = d_shape_vec_full;
+                d_shape_vec(vidx) = d_shape_sub;
                 q_opt_vec   = zeros(1, G);  q_opt_vec(vidx) = q_opt_sub;
-                resid_vec   = inf(1, G);    resid_vec(vidx)  = resid_sub;
+                resid_vec   = inf(1, G);    resid_vec(vidx) = resid_sub;
                 prob_info   = prob_info_sub;
+
                 if ~isempty(fieldnames(prob_info_sub)) && isfield(prob_info_sub, 'd_shape_prob_vec')
-                    d_sp = inf(1, G);  d_sp(vidx) = prob_info_sub.d_shape_prob_vec;
-                    r_sp = inf(1, G);  r_sp(vidx) = prob_info_sub.resid_prob_vec;
+                    d_sp = inf(1, G); d_sp(vidx) = prob_info_sub.d_shape_prob_vec;
+                    r_sp = inf(1, G); r_sp(vidx) = prob_info_sub.resid_prob_vec;
                     prob_info.d_shape_prob_vec = d_sp;
                     prob_info.resid_prob_vec   = r_sp;
+                end
+                if ~isempty(fieldnames(prob_info_sub)) && isfield(prob_info_sub, 'd_shape_mask_vec')
+                    d_sm = inf(1, G); d_sm(vidx) = prob_info_sub.d_shape_mask_vec;
+                    r_sm = inf(1, G); r_sm(vidx) = prob_info_sub.resid_mask_vec;
+                    prob_info.d_shape_mask_vec = d_sm;
+                    prob_info.resid_mask_vec   = r_sm;
                 end
             else
                 [D_vec, d_shape_vec, resid_vec, q_opt_vec, prob_info] = ...
@@ -119,6 +143,13 @@ function LocResults = run_m4_wknn_localization( ...
         extra_info.distance_mode = m4cfg.distance_mode;
         extra_info.prob_info     = prob_info;
         extra_info.preselect_idx = preselect_idx;
+
+        if isfield(prob_info, 'valid_ap_mask')
+            extra_info.valid_ap_mask = prob_info.valid_ap_mask;
+        end
+        if isfield(prob_info, 'n_valid_ap')
+            extra_info.n_valid_ap = prob_info.n_valid_ap;
+        end
 
         lr = record_loc_results_m4(ev, est_pos_xy, F_obs_lin, ...
             neighbor_idx, neighbor_dist, weights, FrameStates, Config, extra_info);
@@ -173,7 +204,7 @@ function [neighbor_idx, neighbor_dist, weights, ...
     sub_fp = extract_band_subset(band_fp, preselect_idx, 'shape_scale_hn');
 
     % ---- 计算 D_hn ----
-    [D_sub, d_shape_sub, resid_sub, q_opt_sub, prob_info_sub] = ...
+    [D_sub, ~, resid_sub, q_opt_sub, prob_info_sub] = ...
         compute_wknn_distance_shape_scale( ...
             F_obs_lin, F_obs_shape, sub_fp, match_cfg);
 
@@ -189,7 +220,7 @@ function [neighbor_idx, neighbor_dist, weights, ...
     % ---- 还原全库向量 ----
     d_shape_vec = d_shape_full;
     q_opt_vec   = zeros(1, G);  q_opt_vec(preselect_idx) = q_opt_sub;
-    resid_vec   = inf(1, G);    resid_vec(preselect_idx)  = resid_sub;
+    resid_vec   = inf(1, G);    resid_vec(preselect_idx) = resid_sub;
 
     % 还原 hn_info 向量到全库大小
     prob_info = prob_info_sub;
@@ -225,13 +256,11 @@ function sub_fp = extract_band_subset(band_fp, vidx, distance_mode)
         sub_fp.F_shape_prob_mu  = band_fp.F_shape_prob_mu(:, vidx);
         sub_fp.F_shape_prob_var = band_fp.F_shape_prob_var(:, vidx);
         sub_fp.std_lin          = band_fp.std_lin(:, vidx);
-        sub_fp.ap_weight_hn    = band_fp.ap_weight_hn(:, vidx);
+        sub_fp.ap_weight_hn     = band_fp.ap_weight_hn(:, vidx);
 
         % hardneg_idx 存的是全库索引，不做子集映射，但需要
         % 指向全库的 mu/var，这里存全库引用供 compute_hn_mode 使用
-        sub_fp.hardneg_idx     = band_fp.hardneg_idx(vidx, :);
-
-        % HN 模式需要全库 mu/var 来算 d_neg（因为 hardneg 指向全库点）
+        sub_fp.hardneg_idx = band_fp.hardneg_idx(vidx, :);
         sub_fp.full_F_shape_prob_mu  = band_fp.F_shape_prob_mu;
         sub_fp.full_F_shape_prob_var = band_fp.F_shape_prob_var;
     end
@@ -251,7 +280,7 @@ function cfg = fill_m4_defaults(Config)
     if isfield(m4, 'distance_mode')
         cfg.distance_mode = m4.distance_mode;
     else
-        cfg.distance_mode = 'shape_scale_hn';
+        cfg.distance_mode = 'shape_scale_masked';
     end
 
     % K 近邻数
@@ -263,9 +292,11 @@ function cfg = fill_m4_defaults(Config)
         case 'shape_scale_hn'
             def_ls = 0.50; def_lr = 0.25;
         case 'shape_scale_prob'
-            def_ls = 0.6;  def_lr = 0.4;
+            def_ls = 0.60; def_lr = 0.40;
+        case 'shape_scale_masked'
+            def_ls = 0.70; def_lr = 0.30;
         otherwise
-            def_ls = 0.7;  def_lr = 0.3;
+            def_ls = 0.70; def_lr = 0.30;
     end
     cfg.lambda_shape = get_or_default(m4, 'lambda_shape', def_ls);
     cfg.lambda_resid = get_or_default(m4, 'lambda_resid', def_lr);
@@ -276,6 +307,23 @@ function cfg = fill_m4_defaults(Config)
     else
         cfg.prob_eps = 1e-12;
     end
+
+    % masked 模式参数
+    ms_defaults = struct();
+    ms_defaults.enable = true;
+    ms_defaults.tau_low_dB = 3;
+    ms_defaults.tau_high_dB = 10;
+    ms_defaults.eps = 1e-12;
+    if isfield(m4, 'masked_shape')
+        ms_in = m4.masked_shape;
+        fns_ms = fieldnames(ms_defaults);
+        for i = 1:numel(fns_ms)
+            if isfield(ms_in, fns_ms{i})
+                ms_defaults.(fns_ms{i}) = ms_in.(fns_ms{i});
+            end
+        end
+    end
+    cfg.masked_shape = ms_defaults;
 
     % ---- HN 模式参数 ----
     if isfield(m4, 'hardneg')
@@ -289,7 +337,7 @@ function cfg = fill_m4_defaults(Config)
 
     % ---- Area Screening 默认参数 ----
     as_defaults = struct();
-    as_defaults.enable       = false;   % HN 模式默认关闭 area screening
+    as_defaults.enable       = false;   % 保持旧逻辑默认
     as_defaults.k_shape      = 5;
     as_defaults.k_final      = 6;
     as_defaults.r_min_m      = 8;
@@ -308,6 +356,63 @@ function cfg = fill_m4_defaults(Config)
         end
     end
     cfg.area_screening = as_defaults;
+end
+
+
+function [noise_floor_dBm, ok, reason] = get_noise_floor_dBm_for_band(Config, band_id, M)
+% GET_NOISE_FLOOR_DBM_FOR_BAND  根据 n0 和 BW 返回当前频带噪声底 (dBm)
+    if nargin < 3 || isempty(M)
+        M = 1;
+    end
+
+    ok = false;
+    reason = '';
+    noise_floor_dBm = [];
+
+    % 模式一：直接给每个 band 的噪声功率
+    if isfield(Config, 'm1') && isfield(Config.m1, 'noise') && ...
+       isfield(Config.m1.noise, 'mode') && strcmp(Config.m1.noise.mode, 'power_dBm')
+        if isfield(Config.m1.noise, 'noise_power_dBm') && ...
+           numel(Config.m1.noise.noise_power_dBm) >= band_id
+            nf = Config.m1.noise.noise_power_dBm(band_id);
+            noise_floor_dBm = repmat(nf, M, 1);
+            ok = true;
+            return;
+        end
+        reason = 'missing noise_power_dBm';
+        return;
+    end
+
+    % 模式二：n0_dBmHz + BW
+    if ~(isfield(Config, 'm1') && isfield(Config.m1, 'noise') && ...
+         isfield(Config.m1.noise, 'n0_dBmHz'))
+        reason = 'missing n0_dBmHz';
+        return;
+    end
+    if ~(isfield(Config, 'm1') && isfield(Config.m1, 'bands') && ...
+         isfield(Config.m1.bands, 'bw_Hz'))
+        reason = 'missing bands.bw_Hz';
+        return;
+    end
+    if numel(Config.m1.bands.bw_Hz) < band_id
+        reason = 'bw_Hz index out of range';
+        return;
+    end
+
+    n0_arr = Config.m1.noise.n0_dBmHz;
+    if isscalar(n0_arr)
+        n0 = n0_arr;
+    elseif numel(n0_arr) >= band_id
+        n0 = n0_arr(band_id);
+    else
+        reason = 'n0_dBmHz index out of range';
+        return;
+    end
+
+    bw_hz = Config.m1.bands.bw_Hz(band_id);
+    nf = n0 + 10 * log10(bw_hz);
+    noise_floor_dBm = repmat(nf, M, 1);
+    ok = true;
 end
 
 

@@ -17,6 +17,9 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
 %       SpatialFP.G                    - 有效网格点数
 %       SpatialFP.grid_xy              - (G x 2)
 %       SpatialFP.ref_power_dBm        - (1 x B) 各频带参考发射功率
+%       SpatialFP.reference_power_dBm_used - (1 x B) 诊断字段
+%       SpatialFP.shape_library_mode       - 诊断字段
+%       SpatialFP.shape_library_prob_mode  - 诊断字段
 %       SpatialFP.band(b).F_dBm        - (M x G)
 %       SpatialFP.band(b).F_lin        - (M x G)
 %       SpatialFP.band(b).std_dBm      - (M x G)
@@ -30,6 +33,7 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
 %       SpatialFP.band(b).F_shape_prob_mu  - (M x G) [若启用]
 %       SpatialFP.band(b).F_shape_prob_var - (M x G) [若启用]
 %       SpatialFP.band(b).ap_weight_global - (M x 1) [若启用]
+%       SpatialFP.band(b).reference_power_dBm_used - 标定功率诊断字段
 %       SpatialFP.band(b).fc_Hz
 %       SpatialFP.band(b).bw_Hz
 %       SpatialFP.band(b).model
@@ -53,6 +57,11 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
     SpatialFP.G = G;
     SpatialFP.grid_xy       = GridValid.xy;
     SpatialFP.ref_power_dBm = ref_power;
+
+    % 诊断字段：明确本次离线库构建的功率与 shape 统计模式
+    SpatialFP.reference_power_dBm_used = ref_power;
+    SpatialFP.shape_library_mode = 'deterministic_l1_from_mean_lin';
+    SpatialFP.shape_library_prob_mode = 'mc_sample_l1_then_mean_var';
 
     fprintf('[M2.5] 构建 SpatialFP: M=%d AP, G=%d 网格点, B=%d 频带\n', M, G, B);
     if ps_cfg.enable
@@ -104,6 +113,7 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
         band_fp.fc_Hz   = Bands.fc_Hz(b);
         band_fp.bw_Hz   = Bands.bw_Hz(b);
         band_fp.model   = Bands.model{b};
+        band_fp.reference_power_dBm_used = ref_power(b);
 
         % 预计算均值和中心化指纹（dBm + 线性 两域）+ L1 shape
         band_fp = precompute_centered_fp_wknn(band_fp);
@@ -111,13 +121,14 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
         % ---- 概率 shape 指纹 & 全局 AP 权重 ----
         if ps_cfg.enable
             band_fp.F_shape_prob_mu  = shape_mu_acc;    % M x G
-            band_fp.F_shape_prob_var = shape_var_acc;    % M x G
+            band_fp.F_shape_prob_var = shape_var_acc;   % M x G
+            band_fp.shape_library_prob_mode = 'mc_sample_l1_then_mean_var';
 
             % 全局 AP 判别权重：
             %   w_m = Var_g(log(phi_{g,m} + eps)) / (Mean_g(sigma_{g,m}^2) + eps)
             log_phi = log(F_lin + ps_cfg.eps_weight);                  % M x G
-            var_across_grid    = var(log_phi, 0, 2);                   % M x 1
-            mean_var_within    = mean(Std_lin.^2, 2);                  % M x 1
+            var_across_grid = var(log_phi, 0, 2);                      % M x 1
+            mean_var_within = mean(Std_lin.^2, 2);                     % M x 1
             w_raw = var_across_grid ./ (mean_var_within + ps_cfg.eps_weight);  % M x 1
 
             % 归一化
@@ -202,7 +213,7 @@ function hn_cfg = fill_hardneg_defaults(Config)
 % FILL_HARDNEG_DEFAULTS  填充 M2.5 hardneg 默认配置
 
     hn_cfg = struct();
-    hn_cfg.enable            = true;
+    hn_cfg.enable            = false;
     hn_cfg.source_shape      = 'prob_mu';   % 'prob_mu' or 'shape_l1'
     hn_cfg.r_far_m           = 25;
     hn_cfg.top_conf          = 6;
@@ -289,7 +300,7 @@ function band_fp = build_hardneg_for_band(band_fp, grid_xy, hn_cfg)
         % shape L2 距离 Nb x G（分块展开，不缓存 G×G）
         S_blk = S(:, idx_b);                          % M x Nb
         D2 = S_sq_all(idx_b)' + S_sq_all ...
-             - 2 * (S_blk' * S);                       % Nb x G
+             - 2 * (S_blk' * S);                      % Nb x G
         D2 = max(D2, 0);
 
         % 排除自身：设为 inf
@@ -358,9 +369,9 @@ function band_fp = build_hardneg_for_band(band_fp, grid_xy, hn_cfg)
     end
 
     band_fp.hardneg_idx        = hardneg_idx;         % G x top_conf
-    band_fp.hardneg_shape_dist = hardneg_shape_dist;   % G x top_conf
-    band_fp.hardneg_phys_dist  = hardneg_phys_dist;    % G x top_conf
-    band_fp.ap_weight_hn       = ap_weight_hn;          % M x G
+    band_fp.hardneg_shape_dist = hardneg_shape_dist;  % G x top_conf
+    band_fp.hardneg_phys_dist  = hardneg_phys_dist;   % G x top_conf
+    band_fp.ap_weight_hn       = ap_weight_hn;        % M x G
 end
 
 

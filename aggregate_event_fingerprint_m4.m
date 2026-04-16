@@ -1,23 +1,15 @@
-function [F_obs_lin, F_obs_shape_l1] = aggregate_event_fingerprint_m4(event, agg_cfg)
+function [F_obs_lin, F_obs_shape_l1, F_obs_dBm] = aggregate_event_fingerprint_m4(event, agg_cfg)
 % AGGREGATE_EVENT_FINGERPRINT_M4  将事件窗口内观测聚合为单个 RSS 指纹
 %
 %   [F_obs_lin, F_obs_shape_l1] = aggregate_event_fingerprint_m4(event)
 %   [F_obs_lin, F_obs_shape_l1] = aggregate_event_fingerprint_m4(event, agg_cfg)
+%   [F_obs_lin, F_obs_shape_l1, F_obs_dBm] = aggregate_event_fingerprint_m4(...)
 %
 %   聚合模式：
-%     'linear_mean'  — 线性域均值（默认）
-%     'linear_median'— 线性域中位数
+%     'linear_mean'   - 线性域均值（默认）
+%     'linear_median' - 线性域中位数
 %
-%   输出统一为线性域 (mW)，同时输出 L1 归一化形状向量。
-%
-%   输入：
-%       event   - 单个事件结构体，需含 obs_segment_lin (M x L)
-%       agg_cfg - [可选] 聚合配置
-%                   agg_cfg.mode = 'linear_mean' / 'linear_median'
-%
-%   输出：
-%       F_obs_lin       - (M x 1) 聚合后 RSS 指纹 (线性 mW)
-%       F_obs_shape_l1  - (M x 1) L1 归一化形状向量
+%   输出统一为线性域 (mW)，同时输出 L1 归一化形状向量和 dBm 向量。
 
     % 默认配置
     if nargin < 2 || isempty(agg_cfg)
@@ -39,6 +31,7 @@ function [F_obs_lin, F_obs_shape_l1] = aggregate_event_fingerprint_m4(event, agg
     if event.duration <= 1
         F_obs_lin = max(seg_lin(:), 1e-30);
         F_obs_shape_l1 = F_obs_lin / (sum(F_obs_lin) + 1e-30);
+        F_obs_dBm = 10 * log10(max(F_obs_lin, 1e-30));
         return;
     end
 
@@ -58,4 +51,5 @@ function [F_obs_lin, F_obs_shape_l1] = aggregate_event_fingerprint_m4(event, agg
 
     % L1 归一化形状向量
     F_obs_shape_l1 = F_obs_lin / (sum(F_obs_lin) + 1e-30);
+    F_obs_dBm = 10 * log10(max(F_obs_lin, 1e-30));
 end
