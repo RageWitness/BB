@@ -101,7 +101,7 @@ fprintf('主循环完成: %d 帧, 耗时 %.2f s (%.1f 帧/s)\n', T, elapsed, T/e
 %% ========== 第 2.5 阶段：M3 事件分类 + M4 WKNN 定位 ==========
 
 % --- M3：单源事件分类 ---
-EventList = run_m3_event_classifier_single_source( ...
+[EventList, GroupListM3] = run_m3_event_classifier_single_source( ...
     Y_dBm_all, Y_lin_all, SpatialFP, SignatureLib, SourceTemplates, Config);
 
 % --- M4：WKNN 定位（只对需定位的事件） ---

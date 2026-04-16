@@ -105,20 +105,35 @@ function Config = default_config_m0()
                                         50, 65];      % band 4
     Config.m0.target.position_mode   = 'uniform';       % 'uniform' 或 'hotspot'
 
-    % --- M3 相对功率特征配置 ---
+    % --- M3 grouping 配置 ---
+    Config.m3.grouping.enable = true;
+    Config.m3.grouping.max_gap_frames = 2;
+
+    % --- M3 相对功率特征配置（辅助证据） ---
     Config.m3.relative_power.enable = true;
     Config.m3.relative_power.topk = 3;
     Config.m3.relative_power.tau_valid_ap_dB = 3;
 
-    % --- M3 trusted / ordinary 门限配置 ---
+    % --- M3 trusted hard gate ---
     Config.m3.trusted.min_active_bands = 3;
-    Config.m3.trusted.min_power_excess_dB = 8;
+    Config.m3.trusted.min_power_z = 1.5;
     Config.m3.trusted.max_power_jitter_dB = 3;
-    Config.m3.trusted.min_position_score = 0.7;
-    Config.m3.trusted.max_position_spread = 15;
+    Config.m3.trusted.min_position_score = 0.70;
+    Config.m3.trusted.max_position_spread_m = 10;
 
+    % --- M3 prior gate ---
+    Config.m3.prior_pos.min_position_score = 0.60;
+    Config.m3.prior_pos.min_margin = 0.10;
+    Config.m3.prior_time.min_time_score = 0.60;
+    Config.m3.prior_time.min_margin = 0.10;
+
+    % --- M3 ordinary fallback ---
+    Config.m3.ordinary.min_detect_z = 0.8;
     Config.m3.ordinary.min_duration_frames = 3;
     Config.m3.ordinary.min_valid_ap = 2;
+
+    % --- M3 route ---
+    Config.m3.route.hold_enable = true;
 
     % --- M4 掩码 shape 配置 ---
     Config.m4.distance_mode = 'shape_scale_masked'; % 可选: shape_scale/shape_scale_prob/shape_scale_hn
