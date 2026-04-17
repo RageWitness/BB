@@ -20,9 +20,12 @@ fprintf('============================================\n\n');
 
 % --- M0 初始化 ---
 % --- 场景配置（可调） ---
-sim_override.ap.num_x     = 8;   % 8 x 8 = 64 个 AP
-sim_override.ap.num_y     = 4;
-sim_override.fp.grid_step = 1;   % 1m 网格
+sim_override.ap.layout = 'edge_internal';
+sim_override.ap.n_edge = 4;
+sim_override.ap.n_inner = 1;
+sim_override.ap.edge_margin_m = 10;
+sim_override.ap.inner_span_ratio = 0.20;
+sim_override.fp.grid_step = 3;   % 3m grid
 
 [SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap(sim_override);
 
@@ -268,8 +271,8 @@ for b = 1:B
     axis equal; grid on;
     xlim(Config.area.x_range); ylim(Config.area.y_range);
 end
-sgtitle(sprintf('M2.5 指纹库: 网格点放信源(ref=%d dBm), 16AP 平均接收 RSS', ...
-    SpatialFP.ref_power_dBm(1)));
+sgtitle(sprintf('M2.5 指纹库: 网格点放信源(ref=%d dBm), %dAP 平均接收 RSS', ...
+    SpatialFP.ref_power_dBm(1), APs.num));
 
 % ===== 图6：M3 事件分类时间线（与图1对齐的 imagesc 风格） =====
 if ~isempty(EventList)
