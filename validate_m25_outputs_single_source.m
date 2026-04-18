@@ -97,9 +97,43 @@ function validate_m25_outputs_single_source(SpatialFP, SignatureLib)
         end
 
         % 指纹值范围检查（RSS 不应超出 [-200, 30] dBm）
-        if any(fb.F_dBm(:) > 30) || any(fb.F_dBm(:) < -200)
-            fprintf('  [WARN] Band %d: F_dBm 值范围 [%.1f, %.1f] 可能异常\n', ...
-                b, min(fb.F_dBm(:)), max(fb.F_dBm(:)));
+        if isfield(fb, 'F_dBm')
+            if any(fb.F_dBm(:) > 30) || any(fb.F_dBm(:) < -200)
+                fprintf('  [WARN] Band %d: F_dBm 值范围 [%.1f, %.1f] 可能异常\n', ...
+                    b, min(fb.F_dBm(:)), max(fb.F_dBm(:)));
+            end
+        end
+
+        % ---- RF_minmax 校验（新框架主指纹） ----
+        if isfield(fb, 'RF_minmax')
+            if size(fb.RF_minmax, 1) ~= M || size(fb.RF_minmax, 2) ~= G
+                fprintf('  [ERROR] Band %d: RF_minmax 维度 %dx%d, 应为 %dx%d\n', ...
+                    b, size(fb.RF_minmax, 1), size(fb.RF_minmax, 2), M, G);
+                n_err = n_err + 1;
+            end
+            if any(isnan(fb.RF_minmax(:))) || any(isinf(fb.RF_minmax(:)))
+                fprintf('  [ERROR] Band %d: RF_minmax 含 NaN/Inf\n', b);
+                n_err = n_err + 1;
+            end
+            mm_min = min(fb.RF_minmax(:));
+            mm_max = max(fb.RF_minmax(:));
+            if mm_min < -1.001 || mm_max > 1.001
+                fprintf('  [WARN] Band %d: RF_minmax 范围 [%.4f, %.4f] 超出 [-1,1]\n', ...
+                    b, mm_min, mm_max);
+            end
+            if isfield(fb, 'rf_minmax_n_degenerate') && fb.rf_minmax_n_degenerate > 0
+                fprintf('  [INFO] Band %d: RF_minmax %d 个退化网格点（常值信号）\n', ...
+                    b, fb.rf_minmax_n_degenerate);
+            end
+            fprintf('  [OK] Band %d: RF_minmax [%.4f, %.4f], mode=%s\n', ...
+                b, mm_min, mm_max, fb.rf_norm_mode);
+        end
+
+        if isfield(fb, 'RF_raw')
+            if size(fb.RF_raw, 1) ~= M || size(fb.RF_raw, 2) ~= G
+                fprintf('  [ERROR] Band %d: RF_raw 维度不正确\n', b);
+                n_err = n_err + 1;
+            end
         end
 
         % ---- hard-negative 字段校验 ----

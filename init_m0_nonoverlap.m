@@ -90,13 +90,12 @@ function Config = default_config_m0()
                                         50, 65];
     Config.m0.target.position_mode = 'uniform';
 
-    % M3 config
-    Config.m3.grouping.enable = true;
+    % --- M3 配置（legacy，主链路已断开，新框架下不再使用） ---
+    Config.m3.grouping.enable = false;
     Config.m3.grouping.max_gap_frames = 2;
     Config.m3.relative_power.enable = true;
     Config.m3.relative_power.topk = 3;
     Config.m3.relative_power.tau_valid_ap_dB = 3;
-
     Config.m3.trusted_hard.enable = true;
     Config.m3.trusted_hard.power_threshold_lin = 1e5;
     Config.m3.trusted_hard.require_all_bands = true;
@@ -105,20 +104,27 @@ function Config = default_config_m0()
     Config.m3.trusted_hard.aggregation = 'mean';
     Config.m3.trusted_hard.mode = 'strict';
     Config.m3.trusted_hard.min_fraction = 0.95;
-
     Config.m3.prior_pos.min_position_score = 0.60;
     Config.m3.prior_pos.min_margin = 0.10;
     Config.m3.prior_time.min_time_score = 0.60;
     Config.m3.prior_time.min_margin = 0.10;
-
     Config.m3.ordinary.min_ratio_sum = 3;
     Config.m3.ordinary.min_ratio_top1 = 5;
     Config.m3.ordinary.min_valid_ap = 2;
     Config.m3.ordinary.min_duration_frames = 3;
-
     Config.m3.linear_power.topk = 3;
     Config.m3.linear_power.alpha_noise = 2;
     Config.m3.route.hold_enable = true;
+
+    % --- 外部源类型输入接口（新框架） ---
+    Config.external_labels.enable   = true;
+    Config.external_labels.required = true;
+    Config.external_labels.source   = 'truth_log';
+
+    % --- M2.5 指纹模式（新框架） ---
+    Config.m25.fingerprint_mode    = 'rf_minmax';
+    Config.m25.keep_legacy_shape   = true;
+    Config.m25.rf_minmax.handle_constant = 'zeros';
 
     % M4 config
     Config.m4.distance_mode = 'shape_scale_masked';
@@ -128,6 +134,8 @@ function Config = default_config_m0()
     Config.m4.masked_shape.eps = 1e-12;
     Config.m4.lambda_shape = 0.7;
     Config.m4.lambda_resid = 0.3;
+    Config.m4.fingerprint_type = 'legacy';   % rf_minmax | rf_raw | shape_l1 | centered_dBm | legacy
+    Config.m4.fp_distance      = 'L2';        % L1 | L2
 end
 
 

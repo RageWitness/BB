@@ -1,38 +1,49 @@
-%% MAIN_SIMULATION  主仿真入口 — M0 源调度 + M1 信道观测 + M2.5 指纹库
+%% MAIN_SIMULATION  主仿真入口 — 新框架
 %
-%  功能：
+%  流程：
 %    1. M0 初始化 + M1 初始化 + M2.5 指纹库构建
-%    2. 主循环：逐帧调度源 → 生成 RSS 观测
-%    3. 硬约束验证
-%    4. 统计输出
-%    5. 可视化（场景布局、频带占用时间线、RSS 热力图、RSS vs 距离、指纹热力图）
+%    2. 主循环：逐帧调度源 -> 生成 RSS 观测
+%    3. 外部源类型标签输入 + 帧级联动
+%    4. M4 WKNN 定位（基于外部标签而非 M3 分类）
+%    5. 硬约束验证
+%    6. 统计输出 + 可视化
 %
-%  后续模块接入点：在主循环内 step_m1 之后添加 M3/M4 等
+%  注意：M3 分类模块已从主链路断开。
+%        源类型由外部输入（当前从 M0 真值日志提取）。
 
 clear; clc; close all;
 rng(42);
 
 fprintf('============================================\n');
-fprintf('  频谱指纹匹配机遇式增强定位 — 主仿真\n');
+fprintf('  频谱指纹匹配机遇式增强定位 — 主仿真（新框架）\n');
 fprintf('============================================\n\n');
 
 %% ========== 第一阶段：初始化 ==========
 
 % --- M0 初始化 ---
-% --- 场景配置（可调） ---
-sim_override.ap.layout = 'edge_internal';
-sim_override.ap.n_edge = 4;
-sim_override.ap.n_inner = 1;
-sim_override.ap.edge_margin_m = 10;
-sim_override.ap.inner_span_ratio = 0.20;
+sim_override.ap.layout = 'explicit';
+sim_override.ap.pos_xy = [
+   65.2850   ,13.7581;
+   14.0990 , 186.6792;
+  192.2744  ,255.9371;
+  203.5478  , 25.5561;
+  273.7034  , 98.0424;
+   67.5742,  113.4034;
+  288.0000  ,215.4216;
+   75.6478  ,274.5550
+];
 sim_override.fp.grid_step = 3;   % 3m grid
+
+% --- M4 匹配指纹类型选择 ---
+sim_override.m4.fingerprint_type = 'rf_raw';   % rf_minmax | rf_raw | shape_l1 | centered_dBm | legacy
+sim_override.m4.fp_distance      = 'L1';          % L1 | L2
 
 [SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap(sim_override);
 
 % --- M1 初始化 ---
 [Bands, ChannelState, Config] = init_m1_channel(Config, APs);
 
-% --- M2.5 指纹库与模板库 ---
+% --- M2.5 指纹库（新框架：主模式 rf_minmax + legacy 兼容）---
 [SpatialFP, SignatureLib] = init_m25_single_source_fp( ...
     APs, Bands, GridValid, Config, SourceTemplates);
 
@@ -46,6 +57,8 @@ fprintf('\n--- 仿真参数 ---\n');
 fprintf('  区域: [%.0f, %.0f] x [%.0f, %.0f] m\n', Config.area.x_range, Config.area.y_range);
 fprintf('  AP: %d 个 | 有效网格: %d 点\n', M, GridValid.Nvalid);
 fprintf('  频带: %d 个 | 总帧数: %d | dt=%.1f s\n', B, T, dt);
+fprintf('  指纹模式: %s\n', SpatialFP.fingerprint_mode);
+fprintf('  M4 指纹匹配: type=%s, dist=%s\n', Config.m4.fingerprint_type, Config.m4.fp_distance);
 for b = 1:B
     fprintf('  Band %d: %s, fc=%.1f MHz, model=%s\n', ...
         b, Bands.name{b}, Bands.fc_Hz(b)/1e6, Bands.model{b});
@@ -55,12 +68,11 @@ end
 
 fprintf('\n--- 主循环开始 (%d 帧) ---\n', T);
 
-% 预分配存储
-FrameStates    = cell(1, T);
-ObsFrames      = cell(1, T);
-Y_dBm_all      = zeros(M, B, T);
-Y_lin_all       = zeros(M, B, T);
-occupancy_matrix = zeros(T, B);   % 0=空, 1=trusted, 2=prior_pos, 3=prior_time, 4=target
+FrameStates      = cell(1, T);
+ObsFrames        = cell(1, T);
+Y_dBm_all        = zeros(M, B, T);
+Y_lin_all        = zeros(M, B, T);
+occupancy_matrix = zeros(T, B);
 
 tic;
 for t = 1:T
@@ -71,9 +83,6 @@ for t = 1:T
     % --- M1：信道观测 ---
     [ChannelState, ObsFrame] = step_m1_generate_obs( ...
         FrameState_t, APs, Bands, ChannelState, Config, t);
-
-    % --- 后续模块（M3/M4 在主循环后以事件级处理） ---
-    % [TODO] M5/M6: 误差统计与标校
 
     % --- 存储 ---
     FrameStates{t} = FrameState_t;
@@ -101,13 +110,27 @@ end
 elapsed = toc;
 fprintf('主循环完成: %d 帧, 耗时 %.2f s (%.1f 帧/s)\n', T, elapsed, T/elapsed);
 
-%% ========== 第 2.5 阶段：M3 事件分类 + M4 WKNN 定位 ==========
+%% ========== 第 2.5 阶段：外部源类型输入 + M4 定位 ==========
+%
+%  新框架：M3 分类已断开，源类型由外部输入。
+%  当前从 M0 真值日志提取外部标签（仿真环境下的 oracle 模式）。
+%  后续对接真实系统时，改为从外部接口读取。
 
-% --- M3：单源事件分类 ---
-[EventList, GroupListM3] = run_m3_event_classifier_single_source( ...
-    Y_dBm_all, Y_lin_all, SpatialFP, SignatureLib, SourceTemplates, Config);
+fprintf('\n--- 外部源类型标签输入 ---\n');
 
-% --- M4：WKNN 定位（只对需定位的事件） ---
+% --- 从真值日志构建外部标签 ---
+ExternalLabelsRaw = build_labels_from_truth_log(M0Logs, Config);
+LabelTable = ingest_external_source_labels(ExternalLabelsRaw, Config);
+
+% --- 标签绑定到帧 ---
+SourceContext = bind_external_labels_to_events(LabelTable, FrameStates, Config);
+
+% --- M4：WKNN 定位（基于外部标签，不再依赖 M3 EventList）---
+%     过渡态：M4 仍使用旧的 EventList 接口，
+%     这里从外部标签构建一个兼容的 EventList 传入 M4。
+EventList = build_event_list_from_context(SourceContext, Y_dBm_all, Y_lin_all, Config);
+
+fprintf('\n');
 LocResults = run_m4_wknn_localization( ...
     EventList, SpatialFP, FrameStates, Config);
 
@@ -143,6 +166,16 @@ for b = 1:B
         fprintf('%-18d', cnt);
     end
     fprintf('\n');
+end
+
+% 外部标签统计
+fprintf('\n--- 外部标签统计 ---\n');
+fprintf('  标签总数: %d\n', SourceContext.n_labels);
+if ~isempty(LabelTable)
+    kinds = {LabelTable.source_kind};
+    fprintf('  trusted: %d, prior_pos: %d, prior_time: %d, ordinary: %d\n', ...
+        sum(strcmp(kinds, 'trusted')), sum(strcmp(kinds, 'prior_pos')), ...
+        sum(strcmp(kinds, 'prior_time')), sum(strcmp(kinds, 'ordinary')));
 end
 
 % RSS 统计
@@ -201,19 +234,12 @@ if ~isempty(M0Logs.TruthLogAll)
     all_ids   = [M0Logs.TruthLogAll.instance_id];
     all_keys  = {M0Logs.TruthLogAll.template_key};
 
-    % trusted_fixed (蓝色五角星)
     mask_tr = strcmp(all_types, 'trusted_fixed');
     h_tr = plot_unique_sources(all_xy, all_ids, mask_tr, 'p', [0.2 0.5 1], 16);
-
-    % prior_pos_known (绿色方块)
     mask_pp = strncmp(all_keys, 'prior_pos_', 10);
     h_pp = plot_unique_sources(all_xy, all_ids, mask_pp, 's', [0 0.8 0.4], 10);
-
-    % prior_time_known (橙色菱形)
     mask_pt = strncmp(all_keys, 'prior_time_', 11);
     h_pt = plot_unique_sources(all_xy, all_ids, mask_pt, 'd', [1 0.7 0], 9);
-
-    % ordinary_target (深色圆点)
     mask_tg = strcmp(all_types, 'ordinary_target');
     h_tg = plot_unique_sources(all_xy, all_ids, mask_tg, 'o', [0.1 0.2 0.2], 7);
 end
@@ -222,8 +248,6 @@ xlabel('X (m)'); ylabel('Y (m)');
 title('场景布局 — 各类源累积出现位置');
 axis equal; grid on;
 xlim(Config.area.x_range); ylim(Config.area.y_range);
-
-% 图例
 leg_h = {}; leg_s = {};
 leg_h{end+1} = plot(NaN, NaN, '.', 'Color', [0.85 0.85 0.85], 'MarkerSize', 10);
 leg_s{end+1} = '有效网格点';
@@ -237,16 +261,12 @@ legend([leg_h{:}], leg_s, 'Location', 'best');
 
 % ===== 图4：最后有源帧 RSS vs 距离 =====
 figure('Name', 'RSS vs 距离', 'Position', [700 700 1000 400]);
-plot_count = 0;
 for b = 1:B
     src_frames = find(occupancy_matrix(:, b) > 0);
     if isempty(src_frames), continue; end
     t_last = src_frames(end);
-
     src_xy = FrameStates{t_last}.active_per_band(b).true_pos_xy;
     dist_m = sqrt(sum((APs.pos_xy - src_xy).^2, 2));
-
-    plot_count = plot_count + 1;
     subplot(1, B, b);
     scatter(dist_m, Y_dBm_all(:, b, t_last), 40, 'filled');
     xlabel('距离 (m)'); ylabel('RSS (dBm)');
@@ -256,95 +276,58 @@ end
 sgtitle('RSS vs 源-AP 距离');
 
 % ===== 图5：SpatialFP 指纹热力图 =====
-% 含义：在每个网格点放置参考信源(0dBm)，16个AP接收的平均RSS
-% mean_dBm(g) 反映该位置信源被 AP 阵列整体感知的强弱
 figure('Name', '指纹库热力图', 'Position', [100 100 1200 700]);
 for b = 1:B
     subplot(2, 2, b);
+    if isfield(SpatialFP.band(b), 'RF_minmax')
+        % 新框架：显示 RF_minmax 的 AP 均值
+        fp_val = mean(SpatialFP.band(b).RF_minmax, 1);
+        fp_label = 'mean(RF\_minmax)';
+    else
+        fp_val = SpatialFP.band(b).mean_dBm;
+        fp_label = 'mean RSS [dBm]';
+    end
     scatter(SpatialFP.grid_xy(:,1), SpatialFP.grid_xy(:,2), ...
-        12, SpatialFP.band(b).mean_dBm, 'filled');
+        12, fp_val, 'filled');
     hold on;
     plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
     colorbar;
     xlabel('X (m)'); ylabel('Y (m)');
-    title(sprintf('Band %d (%s) 各点平均 RSS [dBm]', b, Bands.name{b}));
+    title(sprintf('Band %d (%s) %s', b, Bands.name{b}, fp_label));
     axis equal; grid on;
     xlim(Config.area.x_range); ylim(Config.area.y_range);
 end
-sgtitle(sprintf('M2.5 指纹库: 网格点放信源(ref=%d dBm), %dAP 平均接收 RSS', ...
-    SpatialFP.ref_power_dBm(1), APs.num));
+sgtitle(sprintf('M2.5 指纹库 (%s): %dAP, ref=%ddBm', ...
+    SpatialFP.fingerprint_mode, APs.num, SpatialFP.ref_power_dBm(1)));
 
-% ===== 图6：M3 事件分类时间线（与图1对齐的 imagesc 风格） =====
-if ~isempty(EventList)
-    figure('Name', 'M3 事件分类', 'Position', [50 50 1200 350]);
-
-    % 构建 T x B 矩阵：0=空闲, 1=trusted, 2=prior_pos, 3=prior_time, 4=target
-    m3_matrix = zeros(T, B);
-    for e = 1:numel(EventList)
-        ev = EventList(e);
-        frames = ev.t_start:ev.t_end;
-        switch ev.type_hat
-            case 'trusted_fixed',    val = 1;
-            case 'prior_pos_known',  val = 2;
-            case 'prior_time_known', val = 3;
-            case 'ordinary_target',  val = 4;
-            otherwise,               val = 0;
-        end
-        m3_matrix(frames, ev.band_id) = val;
-    end
-
-    imagesc(1:T, 1:B, m3_matrix');
-    colormap(gca, cmap);
-    clim([0 4]);
-    cbar6 = colorbar;
-    cbar6.Ticks = [0, 1, 2, 3, 4];
-    cbar6.TickLabels = type_names;
-    xlabel('帧号'); ylabel('频带');
-    title('M3 事件分类时间线');
-    set(gca, 'YTick', 1:B);
-    grid on;
-end
-
-% ===== 图7：M4 定位结果散点图 =====
+% ===== 图6：M4 定位结果散点图 =====
 if ~isempty(LocResults)
     figure('Name', 'M4 定位结果', 'Position', [100 100 800 700]);
-
-    % 背景：有效网格 + AP
     plot(GridValid.xy(:,1), GridValid.xy(:,2), '.', 'Color', [0.9 0.9 0.9], 'MarkerSize', 2);
     hold on;
     plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
-
-    % 画每个定位结果
     for k = 1:numel(LocResults)
         lr = LocResults(k);
         if isempty(lr.true_pos_xy) || all(lr.true_pos_xy == 0)
             continue;
         end
-
         switch lr.type_hat
             case 'ordinary_target',  clr = [0.9 0.2 0.2];
             case 'prior_time_known', clr = [1 0.7 0];
             otherwise,               clr = [0.5 0.5 0.5];
         end
-
-        % 真值位置
         plot(lr.true_pos_xy(1), lr.true_pos_xy(2), 'o', ...
             'Color', clr, 'MarkerSize', 8, 'MarkerFaceColor', clr);
-        % 估计位置
         plot(lr.est_pos_xy(1), lr.est_pos_xy(2), 'x', ...
             'Color', clr*0.6, 'MarkerSize', 10, 'LineWidth', 2);
-        % 连线
         plot([lr.true_pos_xy(1), lr.est_pos_xy(1)], ...
              [lr.true_pos_xy(2), lr.est_pos_xy(2)], ...
              '-', 'Color', [clr, 0.4], 'LineWidth', 1);
     end
-
     xlabel('X (m)'); ylabel('Y (m)');
     title('M4 WKNN 定位结果 (o=真值, x=估计)');
     axis equal; grid on;
     xlim(Config.area.x_range); ylim(Config.area.y_range);
-
-    % 图例（在 hold on 状态下画不可见标记）
     leg_h = gobjects(5, 1);
     leg_h(1) = plot(NaN, NaN, 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
     leg_h(2) = plot(NaN, NaN, 'o', 'Color', [0.9 0.2 0.2], 'MarkerSize', 8, 'MarkerFaceColor', [0.9 0.2 0.2]);
@@ -356,9 +339,8 @@ if ~isempty(LocResults)
         'Location', 'best');
 end
 
-% ===== 图8：分频带定位误差统计 =====
+% ===== 图7：分频带定位误差统计 =====
 if ~isempty(LocResults)
-    % 收集有真值的定位结果
     valid_mask = ~arrayfun(@(r) isnan(r.loc_error), LocResults);
     valid_lr = LocResults(valid_mask);
 
@@ -370,10 +352,8 @@ if ~isempty(LocResults)
 
         figure('Name', '分频带定位误差', 'Position', [100 50 1400 800]);
 
-        % --- 子图1：各频带误差箱线图 ---
         subplot(2, 3, 1);
-        grp_data = [];
-        grp_label = [];
+        grp_data = []; grp_label = [];
         for bi = 1:numel(unique_bands)
             bb = unique_bands(bi);
             errs = all_errors(all_bands == bb);
@@ -389,7 +369,6 @@ if ~isempty(LocResults)
         title('各频带误差箱线图');
         grid on;
 
-        % --- 子图2：各频带误差 CDF ---
         subplot(2, 3, 2);
         hold on;
         band_colors = [0.2 0.6 1; 0 0.8 0.4; 1 0.7 0; 0.9 0.2 0.2];
@@ -409,7 +388,6 @@ if ~isempty(LocResults)
         legend(leg_items, 'Location', 'southeast');
         grid on;
 
-        % --- 子图3：各频带 RMSE 柱状图 ---
         subplot(2, 3, 3);
         rmse_per_band = zeros(1, numel(unique_bands));
         mean_per_band = zeros(1, numel(unique_bands));
@@ -429,14 +407,12 @@ if ~isempty(LocResults)
         title('各频带 Mean / RMSE');
         legend('Mean', 'RMSE', 'Location', 'best');
         grid on;
-        % 标注样本数
         for bi = 1:numel(unique_bands)
             text(unique_bands(bi), rmse_per_band(bi) + 2, ...
                 sprintf('n=%d', n_per_band(bi)), ...
                 'HorizontalAlignment', 'center', 'FontSize', 9);
         end
 
-        % --- 子图4：按源类型分频带误差 ---
         subplot(2, 3, 4);
         type_list = {'ordinary_target', 'prior_time_known'};
         type_short = {'target', 'prior\_time'};
@@ -455,7 +431,6 @@ if ~isempty(LocResults)
                 h = plot(x_pos * ones(size(errs)), errs, 'o', ...
                     'Color', type_colors(ti,:), 'MarkerSize', 5, ...
                     'MarkerFaceColor', type_colors(ti,:));
-                % 画均值线
                 plot(x_pos + [-0.1, 0.1], [mean(errs), mean(errs)], '-', ...
                     'Color', type_colors(ti,:)*0.6, 'LineWidth', 2);
                 if bi == 1
@@ -473,13 +448,12 @@ if ~isempty(LocResults)
         end
         grid on;
 
-        % --- 子图5：误差 vs 事件持续帧数 ---
         subplot(2, 3, 5);
-        valid_events = EventList(arrayfun(@(ev) ...
+        loc_events = EventList(arrayfun(@(ev) ...
             strcmp(ev.route_action, 'localize_only') || ...
             strcmp(ev.route_action, 'localize_then_calibrate'), EventList));
-        if numel(valid_events) == numel(valid_lr)
-            durations = [valid_events.duration];
+        if numel(loc_events) == numel(valid_lr)
+            durations = [loc_events.duration];
             scatter(durations, all_errors, 30, all_bands, 'filled');
             colorbar; clim([0.5 B+0.5]);
             xlabel('事件持续帧数'); ylabel('定位误差 (m)');
@@ -487,10 +461,9 @@ if ~isempty(LocResults)
             grid on;
         end
 
-        % --- 子图6：误差 vs 估计功率等级 ---
         subplot(2, 3, 6);
-        if numel(valid_events) == numel(valid_lr)
-            powers = [valid_events.power_level_est];
+        if numel(loc_events) == numel(valid_lr)
+            powers = [loc_events.power_level_est];
             scatter(powers, all_errors, 30, all_bands, 'filled');
             colorbar; clim([0.5 B+0.5]);
             xlabel('事件功率等级 (dBm)'); ylabel('定位误差 (m)');
@@ -500,7 +473,6 @@ if ~isempty(LocResults)
 
         sgtitle('M4 分频带定位误差统计');
 
-        % --- 终端打印详细统计 ---
         fprintf('\n--- 分频带定位误差详细统计 ---\n');
         fprintf('  %-6s %-6s %-10s %-10s %-10s %-10s %-10s\n', ...
             'Band', 'N', 'Mean(m)', 'Median(m)', 'RMSE(m)', 'Max(m)', 'Min(m)');
@@ -518,14 +490,178 @@ if ~isempty(LocResults)
 end
 
 fprintf('\n============================================\n');
-fprintf('  仿真完成\n');
+fprintf('  仿真完成（新框架：外部标签 + rf_minmax 指纹）\n');
 fprintf('============================================\n');
 
 
 %% ==================== 辅助函数 ====================
 
+function ExternalLabelsRaw = build_labels_from_truth_log(M0Logs, Config)
+% BUILD_LABELS_FROM_TRUTH_LOG  从 M0 真值日志提取外部标签（仿真 oracle 模式）
+%
+%   在真实系统中，此函数应替换为外部接口读取。
+
+    ExternalLabelsRaw = struct( ...
+        'source_uid',    {}, ...
+        'band_id',       {}, ...
+        'source_kind',   {}, ...
+        'start_frame',   {}, ...
+        'end_frame',     {}, ...
+        'position_hint', {}, ...
+        'template_key',  {}, ...
+        'metadata',      {});
+
+    if isempty(M0Logs.TruthLogAll)
+        return;
+    end
+
+    % 按 (template_key, band_id) 分组，合并帧范围
+    logs = M0Logs.TruthLogAll;
+    keys = {logs.template_key};
+    bands = [logs.band_id];
+    frames = [logs.frame_id];
+    types = {logs.source_type};
+    positions = reshape([logs.true_pos_xy], 2, [])';
+
+    % 构建唯一 (key, band) 组合
+    combo_keys = {};
+    for i = 1:numel(keys)
+        combo_keys{i} = sprintf('%s__b%d', keys{i}, bands(i)); %#ok<AGROW>
+    end
+    [unique_combos, ~, ic] = unique(combo_keys);
+
+    for j = 1:numel(unique_combos)
+        idx = find(ic == j);
+        lbl = struct();
+        lbl.source_uid = unique_combos{j};
+        lbl.band_id = bands(idx(1));
+        lbl.start_frame = min(frames(idx));
+        lbl.end_frame = max(frames(idx));
+        lbl.position_hint = positions(idx(1), :);
+        lbl.template_key = keys{idx(1)};
+        lbl.metadata = struct();
+
+        src_type = types{idx(1)};
+        switch src_type
+            case 'trusted_fixed',   lbl.source_kind = 'trusted';
+            case 'ordinary_target', lbl.source_kind = 'ordinary';
+            case 'prior'
+                tkey = keys{idx(1)};
+                if contains(tkey, 'prior_pos')
+                    lbl.source_kind = 'prior_pos';
+                elseif contains(tkey, 'prior_time')
+                    lbl.source_kind = 'prior_time';
+                else
+                    lbl.source_kind = 'ordinary';
+                end
+            otherwise
+                lbl.source_kind = 'ordinary';
+        end
+
+        if isempty(ExternalLabelsRaw)
+            ExternalLabelsRaw = lbl;
+        else
+            ExternalLabelsRaw(end+1) = lbl; %#ok<AGROW>
+        end
+    end
+end
+
+
+function EventList = build_event_list_from_context(SourceContext, Y_dBm_all, Y_lin_all, Config)
+% BUILD_EVENT_LIST_FROM_CONTEXT  从 SourceContext 构建 M4 兼容的 EventList
+%
+%   过渡函数：将外部标签转成 M4 能理解的 EventList 结构。
+%   后续 M4 改造完成后可直接消费 SourceContext。
+
+    EventList = [];
+    if isempty(SourceContext.label_table)
+        fprintf('[BuildEvents] 无外部标签，EventList 为空\n');
+        return;
+    end
+
+    [M_ap, ~, ~] = size(Y_dBm_all);
+
+    kind_to_type = struct( ...
+        'trusted',    'trusted_fixed', ...
+        'prior_pos',  'prior_pos_known', ...
+        'prior_time', 'prior_time_known', ...
+        'ordinary',   'ordinary_target');
+
+    kind_to_route = struct( ...
+        'trusted',    'calibrate_direct', ...
+        'prior_pos',  'calibrate_direct', ...
+        'prior_time', 'localize_then_calibrate', ...
+        'ordinary',   'localize_only');
+
+    for i = 1:numel(SourceContext.label_table)
+        lbl = SourceContext.label_table(i);
+        ev = struct();
+        ev.event_id = i;
+        ev.band_id = lbl.band_id;
+        ev.t_start = lbl.start_frame;
+        ev.t_end = lbl.end_frame;
+        ev.time_range = [lbl.start_frame, lbl.end_frame];
+        ev.duration = lbl.end_frame - lbl.start_frame + 1;
+
+        b = lbl.band_id;
+        ts = lbl.start_frame;
+        te = lbl.end_frame;
+        ev.obs_segment_dBm = squeeze(Y_dBm_all(:, b, ts:te));
+        ev.obs_segment_lin = squeeze(Y_lin_all(:, b, ts:te));
+        if ev.duration == 1
+            ev.obs_segment_dBm = ev.obs_segment_dBm(:);
+            ev.obs_segment_lin = ev.obs_segment_lin(:);
+        end
+
+        % 源类型（来自外部标签，不是 M3 判别）
+        kind = lbl.source_kind;
+        if isfield(kind_to_type, kind)
+            ev.type_hat = kind_to_type.(kind);
+        else
+            ev.type_hat = 'unknown';
+        end
+        if isfield(kind_to_route, kind)
+            ev.route_action = kind_to_route.(kind);
+        else
+            ev.route_action = 'hold';
+        end
+
+        ev.linked_template_key = lbl.template_key;
+        ev.source_uid = lbl.source_uid;
+        ev.hold_reason = '';
+        ev.upgrade_hint = 'none';
+
+        % 基础功率特征（M4 需要）
+        P_bar = mean(ev.obs_segment_dBm, 2);
+        ev.power_level_est = mean(P_bar);
+        if ev.duration > 1
+            ev.power_stability_est = var(mean(ev.obs_segment_dBm, 1));
+        else
+            ev.power_stability_est = 0;
+        end
+
+        % M4 兼容字段
+        ev.score_trusted = 0;
+        ev.score_prior_pos = 0;
+        ev.score_prior_time = 0;
+        ev.score_target = 0;
+        ev.band_coverage_vec = zeros(1, Config.m0.num_bands);
+        ev.band_coverage_vec(b) = 1;
+        ev.n_valid_ap = M_ap;
+
+        if isempty(EventList)
+            EventList = ev;
+        else
+            EventList(end+1) = ev; %#ok<AGROW>
+        end
+    end
+
+    fprintf('[BuildEvents] 从 %d 条标签构建 %d 个事件\n', ...
+        numel(SourceContext.label_table), numel(EventList));
+end
+
+
 function h = plot_unique_sources(all_xy, all_ids, mask, marker, color, sz)
-% PLOT_UNIQUE_SOURCES  按实例去重后绘制源位置
     h = [];
     if ~any(mask), return; end
     ids = unique(all_ids(mask));

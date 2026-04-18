@@ -49,6 +49,24 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
         ref_power = 100 * ones(1, B);  % 默认 100 dBm
     end
 
+    % 指纹模式
+    fp_mode = 'both';   % 默认同时输出 rf_minmax + legacy
+    if isfield(Config, 'm25') && isfield(Config.m25, 'fingerprint_mode')
+        fm = Config.m25.fingerprint_mode;
+        if strcmp(fm, 'rf_minmax')
+            fp_mode = 'both';  % rf_minmax 为主，但保留 legacy 兼容
+        elseif strcmp(fm, 'legacy_only')
+            fp_mode = 'legacy';
+        end
+    end
+    keep_legacy = true;
+    if isfield(Config, 'm25') && isfield(Config.m25, 'keep_legacy_shape')
+        keep_legacy = logical(Config.m25.keep_legacy_shape);
+    end
+    if ~keep_legacy
+        fp_mode = 'rf_minmax';
+    end
+
     % prob_shape 配置
     ps_cfg = fill_prob_shape_defaults(Config);
 
@@ -62,6 +80,7 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
     SpatialFP.reference_power_dBm_used = ref_power;
     SpatialFP.shape_library_mode = 'deterministic_l1_from_mean_lin';
     SpatialFP.shape_library_prob_mode = 'mc_sample_l1_then_mean_var';
+    SpatialFP.fingerprint_mode = fp_mode;
 
     fprintf('[M2.5] 构建 SpatialFP: M=%d AP, G=%d 网格点, B=%d 频带\n', M, G, B);
     if ps_cfg.enable
@@ -116,7 +135,7 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
         band_fp.reference_power_dBm_used = ref_power(b);
 
         % 预计算均值和中心化指纹（dBm + 线性 两域）+ L1 shape
-        band_fp = precompute_centered_fp_wknn(band_fp);
+        band_fp = precompute_centered_fp_wknn(band_fp, fp_mode);
 
         % ---- 概率 shape 指纹 & 全局 AP 权重 ----
         if ps_cfg.enable
@@ -155,10 +174,18 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
 
         SpatialFP.band(b) = band_fp;
 
-        fprintf('  Band %d (%s): F_dBm [%.1f, %.1f], F_lin [%.2e, %.2e], shape_l1 [%.4f, %.4f]\n', ...
+        fprintf('  Band %d (%s): F_dBm [%.1f, %.1f], F_lin [%.2e, %.2e]', ...
             b, Bands.name{b}, min(F_dBm(:)), max(F_dBm(:)), ...
-            min(F_lin(:)), max(F_lin(:)), ...
-            min(band_fp.F_shape_l1(:)), max(band_fp.F_shape_l1(:)));
+            min(F_lin(:)), max(F_lin(:)));
+        if isfield(band_fp, 'RF_minmax')
+            fprintf(', RF_minmax [%.3f, %.3f]', ...
+                min(band_fp.RF_minmax(:)), max(band_fp.RF_minmax(:)));
+        end
+        if isfield(band_fp, 'F_shape_l1')
+            fprintf(', shape_l1 [%.4f, %.4f]', ...
+                min(band_fp.F_shape_l1(:)), max(band_fp.F_shape_l1(:)));
+        end
+        fprintf('\n');
     end
 
     % ---- 离线 hard-negative 构建（需要概率型 shape 已就绪） ----

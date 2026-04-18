@@ -15,6 +15,9 @@ function LocResults = run_m4_wknn_localization( ...
     tic;
     m4cfg = fill_m4_defaults(Config);
     fprintf('[M4] distance_mode = %s\n', m4cfg.distance_mode);
+    fprintf('[M4] fingerprint_type = %s, fp_distance = %s\n', ...
+        m4cfg.fingerprint_type, m4cfg.fp_distance);
+    use_fp_l2 = ~strcmp(m4cfg.fingerprint_type, 'legacy');
 
     if isempty(EventList)
         fprintf('[M4] 无事件输入\n');
@@ -79,7 +82,47 @@ function LocResults = run_m4_wknn_localization( ...
         end
 
         %% e. 距离计算（分模式）
-        if strcmp(m4cfg.distance_mode, 'shape_scale_hn')
+        if use_fp_l2
+            % ---- 新框架：FP L1/L2 模式 ----
+            preselect_idx = [];
+            match_cfg_fp = struct();
+            match_cfg_fp.fingerprint_type = m4cfg.fingerprint_type;
+            match_cfg_fp.fp_distance      = m4cfg.fp_distance;
+
+            G = numel(d_shape_vec_full);
+            if scr.screen_applied
+                vidx = scr.valid_idx;
+                sub_fp = extract_band_subset_fp(SpatialFP.band(b), vidx);
+                [D_sub, fp_extra] = compute_wknn_distance_fp_l2( ...
+                    F_obs_lin, F_obs_shape, F_obs_dBm, sub_fp, match_cfg_fp);
+
+                K_final = min(m4cfg.area_screening.k_final, numel(vidx));
+                [nn_local, nn_dist, nn_w] = select_knn_neighbors_m4( ...
+                    D_sub, K_final, m4cfg.eps_val);
+                neighbor_idx  = vidx(nn_local);
+                neighbor_dist = nn_dist;
+                weights       = nn_w;
+
+                d_shape_vec = d_shape_vec_full;
+                q_opt_vec   = zeros(1, G);
+                resid_vec   = inf(1, G);
+                D_full      = inf(1, G);
+                D_full(vidx) = D_sub;
+            else
+                [D_full, fp_extra] = compute_wknn_distance_fp_l2( ...
+                    F_obs_lin, F_obs_shape, F_obs_dBm, SpatialFP.band(b), match_cfg_fp);
+                [neighbor_idx, neighbor_dist, weights] = select_knn_neighbors_m4( ...
+                    D_full, m4cfg.K, m4cfg.eps_val);
+                d_shape_vec = d_shape_vec_full;
+                q_opt_vec   = zeros(1, G);
+                resid_vec   = inf(1, G);
+            end
+
+            prob_info = struct();
+            prob_info.fp_extra = fp_extra;
+            prob_info.D_vec_fp = D_full;
+
+        elseif strcmp(m4cfg.distance_mode, 'shape_scale_hn')
             % ---- HN 模式：preselect → 子集距离 → WKNN ----
             [neighbor_idx, neighbor_dist, weights, ...
              d_shape_vec, q_opt_vec, resid_vec, prob_info, preselect_idx] = ...
@@ -267,6 +310,18 @@ function sub_fp = extract_band_subset(band_fp, vidx, distance_mode)
 end
 
 
+function sub_fp = extract_band_subset_fp(band_fp, vidx)
+% EXTRACT_BAND_SUBSET_FP  为 FP L1/L2 模式提取候选子集
+    sub_fp = struct();
+    if isfield(band_fp, 'F_lin'),        sub_fp.F_lin        = band_fp.F_lin(:, vidx); end
+    if isfield(band_fp, 'RF_raw'),       sub_fp.RF_raw       = band_fp.RF_raw(:, vidx); end
+    if isfield(band_fp, 'RF_minmax'),    sub_fp.RF_minmax    = band_fp.RF_minmax(:, vidx); end
+    if isfield(band_fp, 'F_shape_l1'),   sub_fp.F_shape_l1   = band_fp.F_shape_l1(:, vidx); end
+    if isfield(band_fp, 'centered_dBm'), sub_fp.centered_dBm = band_fp.centered_dBm(:, vidx); end
+    if isfield(band_fp, 'mean_dBm'),     sub_fp.mean_dBm     = band_fp.mean_dBm(vidx); end
+end
+
+
 function cfg = fill_m4_defaults(Config)
 % FILL_M4_DEFAULTS  填充 M4 默认参数
 
@@ -282,6 +337,10 @@ function cfg = fill_m4_defaults(Config)
     else
         cfg.distance_mode = 'shape_scale_masked';
     end
+
+    % 新框架：FP L1/L2 模式开关
+    cfg.fingerprint_type = get_or_default(m4, 'fingerprint_type', 'legacy');
+    cfg.fp_distance      = get_or_default(m4, 'fp_distance', 'L2');
 
     % K 近邻数
     cfg.K = get_or_default(m4, 'K', 3);
@@ -437,7 +496,7 @@ function print_loc_summary(LocResults)
     for k = 1:n
         lr = LocResults(k);
         if ~isnan(lr.loc_error)
-            errors(end+1) = lr.loc_error; %#ok<AGROW>
+            errors(end+1) = lr.loc_error;
         end
         fprintf('  %-6d %-6d %-18s [%6.1f,%6.1f]  %-12s %-10s\n', ...
             lr.event_id, lr.band_id, lr.type_hat, ...
