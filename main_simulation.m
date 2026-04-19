@@ -34,9 +34,13 @@ sim_override.ap.pos_xy = [
 ];
 sim_override.fp.grid_step = 3;   % 3m grid
 
+% --- 指纹库缓存开关 ---
+fp_cache_enable = true;                          % true: 命中即加载、未命中则构建并保存
+fp_cache_file   = 'cache/SpatialFP_mwm.mat';
+
 % --- M4 匹配指纹类型选择 ---
 sim_override.m4.fingerprint_type = 'centered_dBm';   % rf_minmax | rf_raw | shape_l1 | centered_dBm | legacy
-sim_override.m4.fp_distance      = 'L1';          % L1 | L2
+sim_override.m4.fp_distance      = 'L2';          % L1 | L2
 
 % sim_override.m4.distance_mode = 'shape_scale';
 
@@ -47,8 +51,21 @@ sim_override.m4.fp_distance      = 'L1';          % L1 | L2
 [Bands, ChannelState, Config] = init_m1_channel(Config, APs);
 
 % --- M2.5 指纹库（新框架：主模式 rf_minmax + legacy 兼容）---
-[SpatialFP, SignatureLib] = init_m25_single_source_fp( ...
-    APs, Bands, GridValid, Config, SourceTemplates);
+if fp_cache_enable && exist(fp_cache_file, 'file')
+    fprintf('[Cache] 加载指纹库缓存: %s\n', fp_cache_file);
+    S = load(fp_cache_file);
+    SpatialFP    = S.SpatialFP;
+    SignatureLib = S.SignatureLib;
+else
+    [SpatialFP, SignatureLib] = init_m25_single_source_fp( ...
+        APs, Bands, GridValid, Config, SourceTemplates);
+    if fp_cache_enable
+        cache_dir = fileparts(fp_cache_file);
+        if ~isempty(cache_dir) && ~exist(cache_dir, 'dir'), mkdir(cache_dir); end
+        save(fp_cache_file, 'SpatialFP', 'SignatureLib', '-v7.3');
+        fprintf('[Cache] 指纹库已保存: %s\n', fp_cache_file);
+    end
+end
 
 % --- 全局参数 ---
 T = Config.m0.T_total;

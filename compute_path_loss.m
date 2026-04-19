@@ -15,6 +15,7 @@ function out = compute_path_loss(src, ap, freq_hz, buildings, opts)
     if ~isfield(opts, 'tx_power'), opts.tx_power = []; end
     if ~isfield(opts, 'tx_gain'),  opts.tx_gain  = 0; end
     if ~isfield(opts, 'rx_gain'),  opts.rx_gain  = 0; end
+    if ~isfield(opts, 'VG'),       opts.VG       = []; end
 
     p = get_channel_params(freq_hz);
 
@@ -31,7 +32,7 @@ function out = compute_path_loss(src, ap, freq_hz, buildings, opts)
     PL_diff = inf;
     Nc_i = 0;
     if Nw_i > 0
-        pi_d = find_diffraction_path(src, ap, buildings);
+        pi_d = find_diffraction_path(src, ap, buildings, opts.VG);
         if pi_d.ok
             dc = max(pi_d.total_length, p.d0);
             PL_ms_dc = pl_multislope(dc, p);

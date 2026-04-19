@@ -2,11 +2,10 @@ function LocResults = run_m4_wknn_localization( ...
     EventList, SpatialFP, FrameStates, Config)
 % RUN_M4_WKNN_LOCALIZATION  M4 模块总入口 — WKNN 定位
 %
-%   支持四种距离模式：
+%   支持距离模式：
 %     'shape_scale'         - 原始 shape+resid
-%     'shape_scale_prob'    - 全局 AP 权重 + 概率 shape
-%     'shape_scale_hn'      - 局部 hard-negative AP 权重 + 排斥项
 %     'shape_scale_masked'  - 可靠 AP 掩码下的 shape+resid
+%   或通过 fingerprint_type 切换 FP L1/L2 模式（rf_raw / rf_minmax / shape_l1 / centered_dBm）
 
     fprintf('\n============================================\n');
     fprintf('  M4 WKNN 定位模块\n');
@@ -64,9 +63,6 @@ function LocResults = run_m4_wknn_localization( ...
         match_cfg.distance_mode   = m4cfg.distance_mode;
         match_cfg.lambda_shape    = m4cfg.lambda_shape;
         match_cfg.lambda_resid    = m4cfg.lambda_resid;
-        match_cfg.lambda_hn       = m4cfg.lambda_hn;
-        match_cfg.hn_delta_margin = m4cfg.hn_delta_margin;
-        match_cfg.prob_eps        = m4cfg.prob_eps;
         match_cfg.masked_shape    = m4cfg.masked_shape;
         match_cfg.F_obs_dBm       = F_obs_dBm;
 
@@ -123,11 +119,9 @@ function LocResults = run_m4_wknn_localization( ...
             prob_info.D_vec_fp = D_full;
 
         elseif strcmp(m4cfg.distance_mode, 'shape_scale_hn')
-            % ---- HN 模式：preselect → 子集距离 → WKNN ----
-            [neighbor_idx, neighbor_dist, weights, ...
-             d_shape_vec, q_opt_vec, resid_vec, prob_info, preselect_idx] = ...
-                run_hn_pipeline(F_obs_lin, F_obs_shape, SpatialFP.band(b), ...
-                    d_shape_vec_full, scr, m4cfg, match_cfg);
+            error('[M4] shape_scale_hn 模式已移除，请改用 shape_scale_masked 或 FP L1/L2');
+        elseif strcmp(m4cfg.distance_mode, 'shape_scale_prob')
+            error('[M4] shape_scale_prob 模式已移除，请改用 shape_scale_masked 或 FP L1/L2');
         else
             % ---- 原始 / prob / masked 模式 ----
             preselect_idx = [];
@@ -215,97 +209,13 @@ end
 
 %% ==================== 局部函数 ====================
 
-function [neighbor_idx, neighbor_dist, weights, ...
-          d_shape_vec, q_opt_vec, resid_vec, prob_info, preselect_idx] = ...
-    run_hn_pipeline(F_obs_lin, F_obs_shape, band_fp, d_shape_full, scr, m4cfg, match_cfg)
-% RUN_HN_PIPELINE  shape_scale_hn 模式的完整管线
-%
-%   1. preselect：用原始 d_shape 取前 preselect_k 个候选
-%      （若 area screening 生效，先从 valid 集合内选）
-%   2. 对 preselect 子集计算 D_hn
-%   3. 在子集上做最终 WKNN
-
-    G = numel(d_shape_full);
-    preselect_k = m4cfg.hn_preselect_k;
-
-    % ---- 确定 preselect 候选池 ----
-    if scr.screen_applied
-        pool_idx = scr.valid_idx;
-        d_pool   = d_shape_full(pool_idx);
-    else
-        pool_idx = 1:G;
-        d_pool   = d_shape_full;
-    end
-
-    n_pool = numel(pool_idx);
-    n_pre  = min(preselect_k, n_pool);
-    [~, sort_order] = sort(d_pool, 'ascend');
-    pre_local  = sort_order(1:n_pre);
-    preselect_idx = pool_idx(pre_local);          % 全局索引
-
-    % ---- 构造 preselect 子集指纹库 ----
-    sub_fp = extract_band_subset(band_fp, preselect_idx, 'shape_scale_hn');
-
-    % ---- 计算 D_hn ----
-    [D_sub, ~, resid_sub, q_opt_sub, prob_info_sub] = ...
-        compute_wknn_distance_shape_scale( ...
-            F_obs_lin, F_obs_shape, sub_fp, match_cfg);
-
-    % ---- 最终 WKNN ----
-    K_final = min(m4cfg.K, n_pre);
-    [nn_local, nn_dist, nn_w] = select_knn_neighbors_m4( ...
-        D_sub, K_final, m4cfg.eps_val);
-
-    neighbor_idx  = preselect_idx(nn_local);
-    neighbor_dist = nn_dist;
-    weights       = nn_w;
-
-    % ---- 还原全库向量 ----
-    d_shape_vec = d_shape_full;
-    q_opt_vec   = zeros(1, G);  q_opt_vec(preselect_idx) = q_opt_sub;
-    resid_vec   = inf(1, G);    resid_vec(preselect_idx) = resid_sub;
-
-    % 还原 hn_info 向量到全库大小
-    prob_info = prob_info_sub;
-    if isfield(prob_info_sub, 'd_shape_hn_vec')
-        flds = {'d_shape_hn_vec', 'resid_prob_vec', 'd_neg_min_vec', 'p_hn_vec'};
-        for fi = 1:numel(flds)
-            fn = flds{fi};
-            full_v = inf(1, G);
-            if strcmp(fn, 'p_hn_vec')
-                full_v = zeros(1, G);
-            end
-            full_v(preselect_idx) = prob_info_sub.(fn);
-            prob_info.(fn) = full_v;
-        end
-    end
-end
-
-
-function sub_fp = extract_band_subset(band_fp, vidx, distance_mode)
-% EXTRACT_BAND_SUBSET  从频带指纹库中提取子集
-
+function sub_fp = extract_band_subset(band_fp, vidx, distance_mode) %#ok<INUSD>
+% EXTRACT_BAND_SUBSET  shape_scale / shape_scale_masked 子集提取
     sub_fp = struct();
     sub_fp.F_lin      = band_fp.F_lin(:, vidx);
     sub_fp.F_shape_l1 = band_fp.F_shape_l1(:, vidx);
-
-    if strcmp(distance_mode, 'shape_scale_prob')
-        sub_fp.F_shape_prob_mu  = band_fp.F_shape_prob_mu(:, vidx);
-        sub_fp.F_shape_prob_var = band_fp.F_shape_prob_var(:, vidx);
-        sub_fp.ap_weight_global = band_fp.ap_weight_global;
-        sub_fp.std_lin          = band_fp.std_lin(:, vidx);
-
-    elseif strcmp(distance_mode, 'shape_scale_hn')
-        sub_fp.F_shape_prob_mu  = band_fp.F_shape_prob_mu(:, vidx);
-        sub_fp.F_shape_prob_var = band_fp.F_shape_prob_var(:, vidx);
-        sub_fp.std_lin          = band_fp.std_lin(:, vidx);
-        sub_fp.ap_weight_hn     = band_fp.ap_weight_hn(:, vidx);
-
-        % hardneg_idx 存的是全库索引，不做子集映射，但需要
-        % 指向全库的 mu/var，这里存全库引用供 compute_hn_mode 使用
-        sub_fp.hardneg_idx = band_fp.hardneg_idx(vidx, :);
-        sub_fp.full_F_shape_prob_mu  = band_fp.F_shape_prob_mu;
-        sub_fp.full_F_shape_prob_var = band_fp.F_shape_prob_var;
+    if isfield(band_fp, 'std_lin')
+        sub_fp.std_lin = band_fp.std_lin(:, vidx);
     end
 end
 
@@ -343,15 +253,11 @@ function cfg = fill_m4_defaults(Config)
     cfg.fp_distance      = get_or_default(m4, 'fp_distance', 'L2');
 
     % K 近邻数
-    cfg.K = get_or_default(m4, 'K', 3);
-    cfg.eps_val = get_or_default(m4, 'eps_val', 1e-6);
+    cfg.K = get_or_default(m4, 'K', 5);
+    cfg.eps_val = get_or_default(m4, 'eps_val', 1e-19);
 
     % lambda（根据模式设不同默认值）
     switch cfg.distance_mode
-        case 'shape_scale_hn'
-            def_ls = 0.50; def_lr = 0.25;
-        case 'shape_scale_prob'
-            def_ls = 0.60; def_lr = 0.40;
         case 'shape_scale_masked'
             def_ls = 0.70; def_lr = 0.30;
         otherwise
@@ -359,13 +265,6 @@ function cfg = fill_m4_defaults(Config)
     end
     cfg.lambda_shape = get_or_default(m4, 'lambda_shape', def_ls);
     cfg.lambda_resid = get_or_default(m4, 'lambda_resid', def_lr);
-
-    % prob 模式防除零
-    if isfield(m4, 'prob_shape') && isfield(m4.prob_shape, 'eps')
-        cfg.prob_eps = m4.prob_shape.eps;
-    else
-        cfg.prob_eps = 1e-12;
-    end
 
     % masked 模式参数
     ms_defaults = struct();
@@ -384,19 +283,9 @@ function cfg = fill_m4_defaults(Config)
     end
     cfg.masked_shape = ms_defaults;
 
-    % ---- HN 模式参数 ----
-    if isfield(m4, 'hardneg')
-        hn = m4.hardneg;
-    else
-        hn = struct();
-    end
-    cfg.hn_preselect_k = get_or_default(hn, 'preselect_k', 20);
-    cfg.hn_delta_margin = get_or_default(hn, 'delta_margin', 0.15);
-    cfg.lambda_hn      = get_or_default(hn, 'lambda_hn', 0.25);
-
     % ---- Area Screening 默认参数 ----
     as_defaults = struct();
-    as_defaults.enable       = true;   % 保持旧逻辑默认
+    as_defaults.enable       = false;   % 保持旧逻辑默认
     as_defaults.k_shape      = 5;
     as_defaults.k_final      = 6;
     as_defaults.r_min_m      = 8;

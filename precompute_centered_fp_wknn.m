@@ -75,8 +75,5 @@ function SpatialFP_band = precompute_centered_fp_wknn(SpatialFP_band, fp_mode)
         SpatialFP_band.F_shape_l1 = F_lin ./ norm_l1_safe;
 
         SpatialFP_band.shape_library_mode = 'deterministic_l1_from_mean_lin';
-        if isfield(SpatialFP_band, 'F_shape_prob_mu') && isfield(SpatialFP_band, 'F_shape_prob_var')
-            SpatialFP_band.shape_library_prob_mode = 'mc_sample_l1_then_mean_var';
-        end
     end
 end

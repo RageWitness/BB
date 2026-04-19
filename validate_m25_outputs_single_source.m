@@ -54,48 +54,6 @@ function validate_m25_outputs_single_source(SpatialFP, SignatureLib)
             end
         end
 
-        % ---- 概率 shape 指纹校验 ----
-        if isfield(fb, 'F_shape_prob_mu')
-            if size(fb.F_shape_prob_mu, 1) ~= M || size(fb.F_shape_prob_mu, 2) ~= G
-                fprintf('  [ERROR] Band %d: F_shape_prob_mu 维度 %dx%d, 应为 %dx%d\n', ...
-                    b, size(fb.F_shape_prob_mu, 1), size(fb.F_shape_prob_mu, 2), M, G);
-                n_err = n_err + 1;
-            end
-            if any(isnan(fb.F_shape_prob_mu(:))) || any(isinf(fb.F_shape_prob_mu(:)))
-                fprintf('  [ERROR] Band %d: F_shape_prob_mu 含 NaN/Inf\n', b);
-                n_err = n_err + 1;
-            end
-        end
-        if isfield(fb, 'F_shape_prob_var')
-            if size(fb.F_shape_prob_var, 1) ~= M || size(fb.F_shape_prob_var, 2) ~= G
-                fprintf('  [ERROR] Band %d: F_shape_prob_var 维度 %dx%d, 应为 %dx%d\n', ...
-                    b, size(fb.F_shape_prob_var, 1), size(fb.F_shape_prob_var, 2), M, G);
-                n_err = n_err + 1;
-            end
-            if any(fb.F_shape_prob_var(:) < 0)
-                fprintf('  [ERROR] Band %d: F_shape_prob_var 含负值\n', b);
-                n_err = n_err + 1;
-            end
-            if any(isnan(fb.F_shape_prob_var(:))) || any(isinf(fb.F_shape_prob_var(:)))
-                fprintf('  [ERROR] Band %d: F_shape_prob_var 含 NaN/Inf\n', b);
-                n_err = n_err + 1;
-            end
-        end
-        if isfield(fb, 'ap_weight_global')
-            if length(fb.ap_weight_global) ~= M
-                fprintf('  [ERROR] Band %d: ap_weight_global 长度 %d, 应为 %d\n', ...
-                    b, length(fb.ap_weight_global), M);
-                n_err = n_err + 1;
-            end
-            if any(isnan(fb.ap_weight_global)) || any(isinf(fb.ap_weight_global))
-                fprintf('  [ERROR] Band %d: ap_weight_global 含 NaN/Inf\n', b);
-                n_err = n_err + 1;
-            end
-            if any(fb.ap_weight_global <= 0)
-                fprintf('  [WARN] Band %d: ap_weight_global 含非正值\n', b);
-            end
-        end
-
         % 指纹值范围检查（RSS 不应超出 [-200, 30] dBm）
         if isfield(fb, 'F_dBm')
             if any(fb.F_dBm(:) > 30) || any(fb.F_dBm(:) < -200)
@@ -133,33 +91,6 @@ function validate_m25_outputs_single_source(SpatialFP, SignatureLib)
             if size(fb.RF_raw, 1) ~= M || size(fb.RF_raw, 2) ~= G
                 fprintf('  [ERROR] Band %d: RF_raw 维度不正确\n', b);
                 n_err = n_err + 1;
-            end
-        end
-
-        % ---- hard-negative 字段校验 ----
-        if isfield(fb, 'hardneg_idx')
-            if size(fb.hardneg_idx, 1) ~= G
-                fprintf('  [ERROR] Band %d: hardneg_idx 行数 %d, 应为 %d\n', ...
-                    b, size(fb.hardneg_idx, 1), G);
-                n_err = n_err + 1;
-            end
-            if any(isnan(fb.hardneg_idx(:)))
-                fprintf('  [ERROR] Band %d: hardneg_idx 含 NaN\n', b);
-                n_err = n_err + 1;
-            end
-        end
-        if isfield(fb, 'ap_weight_hn')
-            if size(fb.ap_weight_hn, 1) ~= M || size(fb.ap_weight_hn, 2) ~= G
-                fprintf('  [ERROR] Band %d: ap_weight_hn 维度 %dx%d, 应为 %dx%d\n', ...
-                    b, size(fb.ap_weight_hn, 1), size(fb.ap_weight_hn, 2), M, G);
-                n_err = n_err + 1;
-            end
-            if any(isnan(fb.ap_weight_hn(:))) || any(isinf(fb.ap_weight_hn(:)))
-                fprintf('  [ERROR] Band %d: ap_weight_hn 含 NaN/Inf\n', b);
-                n_err = n_err + 1;
-            end
-            if any(fb.ap_weight_hn(:) <= 0)
-                fprintf('  [WARN] Band %d: ap_weight_hn 含非正值\n', b);
             end
         end
     end
