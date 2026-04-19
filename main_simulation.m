@@ -1,4 +1,4 @@
-%% MAIN_SIMULATION  主仿真入口 — 新框架
+﻿%% MAIN_SIMULATION  主仿真入口 — 新框架
 %
 %  流程：
 %    1. M0 初始化 + M1 初始化 + M2.5 指纹库构建
@@ -35,8 +35,11 @@ sim_override.ap.pos_xy = [
 sim_override.fp.grid_step = 3;   % 3m grid
 
 % --- M4 匹配指纹类型选择 ---
-sim_override.m4.fingerprint_type = 'rf_raw';   % rf_minmax | rf_raw | shape_l1 | centered_dBm | legacy
+sim_override.m4.fingerprint_type = 'centered_dBm';   % rf_minmax | rf_raw | shape_l1 | centered_dBm | legacy
 sim_override.m4.fp_distance      = 'L1';          % L1 | L2
+
+% sim_override.m4.distance_mode = 'shape_scale';
+
 
 [SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap(sim_override);
 
@@ -226,6 +229,20 @@ sgtitle('M1 RSS 热力图 (AP x 帧)');
 figure('Name', '场景布局', 'Position', [700 50 700 600]);
 plot(GridValid.xy(:,1), GridValid.xy(:,2), '.', 'Color', [0.85 0.85 0.85], 'MarkerSize', 3);
 hold on;
+
+% --- 绘制建筑（半透明灰色色块 + 深色边框）---
+if isfield(Config, 'm1') && isfield(Config.m1, 'channel') && ...
+        isfield(Config.m1.channel, 'buildings') && ~isempty(Config.m1.channel.buildings)
+    blds = Config.m1.channel.buildings;
+    for k = 1:numel(blds)
+        b = blds(k);
+        xv = [b.xmin b.xmax b.xmax b.xmin];
+        yv = [b.ymin b.ymin b.ymax b.ymax];
+        patch(xv, yv, [0.35 0.45 0.55], 'FaceAlpha', 0.25, ...
+            'EdgeColor', [0.25 0.30 0.40], 'LineWidth', 0.8);
+    end
+end
+
 plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
 
 if ~isempty(M0Logs.TruthLogAll)
@@ -275,32 +292,8 @@ for b = 1:B
 end
 sgtitle('RSS vs 源-AP 距离');
 
-% ===== 图5：SpatialFP 指纹热力图 =====
-figure('Name', '指纹库热力图', 'Position', [100 100 1200 700]);
-for b = 1:B
-    subplot(2, 2, b);
-    if isfield(SpatialFP.band(b), 'RF_minmax')
-        % 新框架：显示 RF_minmax 的 AP 均值
-        fp_val = mean(SpatialFP.band(b).RF_minmax, 1);
-        fp_label = 'mean(RF\_minmax)';
-    else
-        fp_val = SpatialFP.band(b).mean_dBm;
-        fp_label = 'mean RSS [dBm]';
-    end
-    scatter(SpatialFP.grid_xy(:,1), SpatialFP.grid_xy(:,2), ...
-        12, fp_val, 'filled');
-    hold on;
-    plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
-    colorbar;
-    xlabel('X (m)'); ylabel('Y (m)');
-    title(sprintf('Band %d (%s) %s', b, Bands.name{b}, fp_label));
-    axis equal; grid on;
-    xlim(Config.area.x_range); ylim(Config.area.y_range);
-end
-sgtitle(sprintf('M2.5 指纹库 (%s): %dAP, ref=%ddBm', ...
-    SpatialFP.fingerprint_mode, APs.num, SpatialFP.ref_power_dBm(1)));
 
-% ===== 图6：M4 定位结果散点图 =====
+% ===== 图5：M4 定位结果散点图 =====
 if ~isempty(LocResults)
     figure('Name', 'M4 定位结果', 'Position', [100 100 800 700]);
     plot(GridValid.xy(:,1), GridValid.xy(:,2), '.', 'Color', [0.9 0.9 0.9], 'MarkerSize', 2);
@@ -339,7 +332,7 @@ if ~isempty(LocResults)
         'Location', 'best');
 end
 
-% ===== 图7：分频带定位误差统计 =====
+% ===== 图6：分频带定位误差统计 =====
 if ~isempty(LocResults)
     valid_mask = ~arrayfun(@(r) isnan(r.loc_error), LocResults);
     valid_lr = LocResults(valid_mask);

@@ -43,31 +43,19 @@ function BandObs = generate_band_obs_m1(active_band_state, APs, Bands, ...
     src_xy   = active_band_state.true_pos_xy;
     tx_power = active_band_state.tx_power_dBm;
 
-    % 1. 计算源到各 AP 距离
-    dist_m = sqrt(sum((APs.pos_xy - src_xy).^2, 2));  % M x 1
-    dist_m = max(dist_m, 1);  % 最小 1m 保护
+    % 1. 计算源到各 AP 距离（仅供 meta 记录）
+    dist_m = sqrt(sum((APs.pos_xy - src_xy).^2, 2));  %#ok<NASGU>
 
-    % 2. 根据频带模型计算路径损耗
-    model = Bands.model{b};
-    switch model
-        case 'cost231wi'
-            PL_dB = compute_pathloss_cost231wi(dist_m, Bands.fc_Hz(b), ...
-                Config.m1.channel.cost231wi);
-        case 'lognormal'
-            PL_dB = compute_pathloss_lognormal(dist_m, b, ChannelState, Config);
-        otherwise
-            error('[M1] 未知信道模型: %s', model);
-    end
+    % 2. 根据频带模型计算路径损耗（统一 MWM 模型）
+    buildings = Config.m1.channel.buildings;
+    [PL_dB, ~] = compute_pathloss_mwm(src_xy, APs.pos_xy, Bands.fc_Hz(b), buildings);
 
-    % 3. 叠加慢变偏置
+    % 3. 叠加慢变偏置（MWM 模型下阴影由 sigma 残差承担，此处仅全局/AP 偏置）
     drift_dB = zeros(M, 1);
     if Config.m1.channel.enableSlowDrift
         drift_dB = drift_dB + ChannelState.global_bias_dB(b);
         drift_dB = drift_dB + ChannelState.ap_bias_dB(:, b);
-        % 注意：lognormal 模型中 shadow 已包含在 PL 内
-        if strcmp(model, 'cost231wi')
-            drift_dB = drift_dB + ChannelState.shadow_state_dB(:, b);
-        end
+        drift_dB = drift_dB + ChannelState.shadow_state_dB(:, b);
     end
 
     % 4. 接收信号功率

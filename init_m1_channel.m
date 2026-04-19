@@ -49,29 +49,18 @@ function Config = fill_m1_defaults(Config)
         Config.m1.bands.name  = {'VHF-96M', 'VHF-89M', 'ISM-2.4G', 'S-2.6G'};
     end
 
-    % --- 信道模型选择 ---
+    % --- 信道模型选择（统一 MWM 模型）---
     if ~isfield(Config.m1, 'channel') || ~isfield(Config.m1.channel, 'model_per_band')
-        Config.m1.channel.model_per_band = {'lognormal', 'lognormal', 'lognormal', 'lognormal'};
+        Config.m1.channel.model_per_band = {'mwm', 'mwm', 'mwm', 'mwm'};
     end
 
-    % --- lognormal 参数 ---
-    if ~isfield(Config.m1.channel, 'lognormal')
-        Config.m1.channel.lognormal.d0_m      = 1;
-        Config.m1.channel.lognormal.PL0_dB    = [32, 31, 40, 41];
-        Config.m1.channel.lognormal.n_exp     = [2.8, 2.8, 3.0, 3.0];
-        Config.m1.channel.lognormal.sigma_dB  = [6, 6, 8, 8];
+    % --- 建筑布局（新统一模型使用）---
+    if ~isfield(Config.m1.channel, 'buildings') || isempty(Config.m1.channel.buildings)
+        Config.m1.channel.buildings = get_default_buildings();
     end
- 
-    % --- COST231-WI 参数 ---
-    if ~isfield(Config.m1.channel, 'cost231wi')
-        Config.m1.channel.cost231wi.h_base_m     = 3;
-        Config.m1.channel.cost231wi.h_mobile_m   = 1.5;
-        Config.m1.channel.cost231wi.h_roof_m     = 12;
-        Config.m1.channel.cost231wi.w_street_m   = 15;
-        Config.m1.channel.cost231wi.w_building_m = 30;
-        Config.m1.channel.cost231wi.phi_deg      = 45;
-        Config.m1.channel.cost231wi.city_type    = 'medium';
-    end
+
+    % --- legacy 保留字段（不再使用，仅防止下游读取报错）---
+    % 旧 lognormal / COST231-WI 配置块已删除 (统一 MWM 模型不再需要)
 
     % --- 慢变 ---
     if ~isfield(Config.m1.channel, 'enableSlowDrift')
@@ -83,7 +72,7 @@ function Config = fill_m1_defaults(Config)
         Config.m1.slow.ap.rho       = 0.995;
         Config.m1.slow.ap.sigma     = 0.2;
         Config.m1.slow.shadow.rho   = 0.98;
-        Config.m1.slow.shadow.sigma = Config.m1.channel.lognormal.sigma_dB;
+        Config.m1.slow.shadow.sigma = 4 * ones(1, B);
     end
 
     % --- 噪声 ---

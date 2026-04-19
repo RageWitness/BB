@@ -396,7 +396,7 @@ function cfg = fill_m4_defaults(Config)
 
     % ---- Area Screening 默认参数 ----
     as_defaults = struct();
-    as_defaults.enable       = false;   % 保持旧逻辑默认
+    as_defaults.enable       = true;   % 保持旧逻辑默认
     as_defaults.k_shape      = 5;
     as_defaults.k_final      = 6;
     as_defaults.r_min_m      = 8;
