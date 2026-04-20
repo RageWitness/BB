@@ -1,11 +1,16 @@
 function FrameState_t = finalize_frame_state_m0(M0State, BandWinners, t, Config)
-% FINALIZE_FRAME_STATE_M0  组装当前帧的输出结构（含先验对象）
+% FINALIZE_FRAME_STATE_M0  组装当前帧的统一 SourceEvent 输出
 %
-%   FrameState_t.active_per_band(b) 现在除了真值信息外，还携带：
-%     position_prior, time_prior, power_nominal_dBm, power_range_dBm,
-%     power_stability_level, credibility_prior, upgrade_potential
+%   FrameState_t.active_per_band(b) 字段（统一 SourceEvent 结构）：
+%     source_type, priority, band_id, band_list,
+%     true_position, true_tx_power, tx_power_by_band,
+%     location_prior(.type/.value), power_prior(.type/.value),
+%     timestamp, is_persistent, is_selected_final
+%   兼容字段（过渡期保留给 M1 / 现有下游代码）：
+%     has_source, true_pos_xy, tx_power_dBm,
+%     is_calibrator, is_localization_target, template_key, instance_id, life_remaining
 
-    B = Config.m0.num_bands;
+    B  = Config.m0.num_bands;
     dt = Config.m0.dt;
 
     FrameState_t.frame_id = t;
@@ -14,77 +19,87 @@ function FrameState_t = finalize_frame_state_m0(M0State, BandWinners, t, Config)
     active_ids = [];
     active_band_count = 0;
 
-    % 空先验对象（用于无源频带）
-    empty_pos_prior  = struct('mode','','candidate_positions',[],'match_radius',[]);
-    empty_time_prior = struct('mode','','schedule',[],'period_frames',[], ...
-                              'duration_frames',[],'phase_frames',[]);
-
     for b = 1:B
         if BandWinners(b).has_source
             w = BandWinners(b).winner;
 
+            % --- 新 SourceEvent 字段 ---
+            apb.source_type        = w.source_type;
+            apb.priority           = w.priority;
+            apb.band_id            = b;
+            if isempty(w.band_list)
+                apb.band_list = b;
+            else
+                apb.band_list = w.band_list;
+            end
+            apb.true_position      = w.true_position;
+            apb.true_tx_power      = w.true_tx_power;
+            apb.tx_power_by_band   = w.tx_power_by_band;
+            apb.location_prior     = w.location_prior;
+            apb.power_prior        = w.power_prior;
+            apb.timestamp          = t;
+            apb.is_persistent      = w.is_persistent;
+            apb.is_selected_final  = true;
+
+            % --- 兼容字段 ---
             apb.has_source             = true;
-            apb.source_type            = w.source_type;
-            apb.source_subtype         = w.source_subtype;
+            apb.source_subtype         = w.source_type;
             apb.template_key           = w.template_key;
             apb.instance_id            = w.instance_id;
-            apb.band_id                = b;
-            apb.true_pos_xy            = w.true_pos_xy;
-            apb.tx_power_dBm           = w.tx_power_dBm;
+            apb.true_pos_xy            = w.true_position;
+            apb.tx_power_dBm           = w.true_tx_power;
+            apb.is_calibrator          = strcmp(w.source_type, 'broadband_cal') || ...
+                                         strcmp(w.source_type, 'persistent_cal');
+            apb.is_localization_target = strcmp(w.source_type, 'target');
 
-            % 查找 life_remaining
-            apb.life_remaining = 0;
-            for k = 1:numel(M0State.instances)
-                if M0State.instances(k).instance_id == w.instance_id
-                    apb.life_remaining = M0State.instances(k).life_remaining;
-                    break;
+            % life_remaining（查找实例池；持续源固定 -1）
+            apb.life_remaining = -1;
+            if w.instance_id > 0
+                for k = 1:numel(M0State.instances)
+                    if M0State.instances(k).instance_id == w.instance_id
+                        apb.life_remaining = M0State.instances(k).life_remaining;
+                        break;
+                    end
                 end
             end
-
-            % 标记
-            apb.is_calibrator          = strcmp(w.source_type, 'trusted_fixed') || ...
-                                         strcmp(w.source_subtype, 'prior_pos_known');
-            apb.is_localization_target = strcmp(w.source_type, 'ordinary_target');
-
-            % --- 先验对象（从 winner 直接传递） ---
-            apb.position_prior        = w.position_prior;
-            apb.time_prior            = w.time_prior;
-            apb.power_nominal_dBm     = w.power_nominal_dBm;
-            apb.power_range_dBm       = w.power_range_dBm;
-            apb.power_stability_level = w.power_stability_level;
-            apb.credibility_prior     = w.credibility_prior;
-            apb.upgrade_potential     = w.upgrade_potential;
 
             FrameState_t.active_per_band(b) = apb;
 
             active_band_count = active_band_count + 1;
-            if ~ismember(w.instance_id, active_ids)
+            if w.instance_id > 0 && ~ismember(w.instance_id, active_ids)
                 active_ids(end+1) = w.instance_id; %#ok<AGROW>
             end
         else
-            apb.has_source             = false;
-            apb.source_type            = '';
-            apb.source_subtype         = '';
-            apb.template_key           = '';
-            apb.instance_id            = 0;
-            apb.band_id                = b;
-            apb.true_pos_xy            = [0, 0];
-            apb.tx_power_dBm           = 0;
-            apb.life_remaining         = 0;
-            apb.is_calibrator          = false;
-            apb.is_localization_target = false;
-            apb.position_prior         = empty_pos_prior;
-            apb.time_prior             = empty_time_prior;
-            apb.power_nominal_dBm     = 0;
-            apb.power_range_dBm       = [0, 0];
-            apb.power_stability_level = 0;
-            apb.credibility_prior     = 0;
-            apb.upgrade_potential     = 'none';
-
-            FrameState_t.active_per_band(b) = apb;
+            FrameState_t.active_per_band(b) = empty_event(b, t);
         end
     end
 
     FrameState_t.active_source_count_unique = numel(active_ids);
     FrameState_t.active_band_count          = active_band_count;
+end
+
+
+function apb = empty_event(b, t)
+    apb.source_type        = '';
+    apb.priority           = 0;
+    apb.band_id            = b;
+    apb.band_list          = b;
+    apb.true_position      = [0, 0];
+    apb.true_tx_power      = 0;
+    apb.tx_power_by_band   = [];
+    apb.location_prior     = struct('type','none','value',[]);
+    apb.power_prior        = struct('type','none','value',[]);
+    apb.timestamp          = t;
+    apb.is_persistent      = false;
+    apb.is_selected_final  = false;
+
+    apb.has_source             = false;
+    apb.source_subtype         = '';
+    apb.template_key           = '';
+    apb.instance_id            = 0;
+    apb.true_pos_xy            = [0, 0];
+    apb.tx_power_dBm           = 0;
+    apb.is_calibrator          = false;
+    apb.is_localization_target = false;
+    apb.life_remaining         = 0;
 end

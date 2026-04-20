@@ -11,6 +11,22 @@ function loc_result = record_loc_results_m4(event, est_pos_xy, F_obs, ...
     loc_result.route_action = event.route_action;
     loc_result.time_range   = event.time_range;
 
+    if isfield(event, 'label')
+        loc_result.label = event.label;
+    else
+        loc_result.label = [];
+    end
+    if isfield(event, 'source_uid')
+        loc_result.source_uid = event.source_uid;
+    else
+        loc_result.source_uid = '';
+    end
+    if isfield(event, 'linked_template_key')
+        loc_result.linked_template_key = event.linked_template_key;
+    else
+        loc_result.linked_template_key = '';
+    end
+
     % 观测与估计
     loc_result.obs_fp_lin   = F_obs;
     loc_result.obs_fp_dBm   = 10 * log10(max(F_obs, 1e-30));
@@ -33,7 +49,7 @@ function loc_result = record_loc_results_m4(event, est_pos_xy, F_obs, ...
 
     % 噪声底
     if isfield(Config, 'm1') && isfield(Config.m1, 'noise') && ...
-       isfield(Config.m1.noise, 'n0_dBmHz')
+            isfield(Config.m1.noise, 'n0_dBmHz')
         loc_result.n0 = Config.m1.noise.n0_dBmHz;
     else
         loc_result.n0 = -174;

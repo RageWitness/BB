@@ -1,31 +1,28 @@
 function LabelTable = ingest_external_source_labels(raw_labels, Config)
-% INGEST_EXTERNAL_SOURCE_LABELS  外部源类型输入接口
+% INGEST_EXTERNAL_SOURCE_LABELS  外部源类型输入接口（新标签体系）
 %
 %   LabelTable = ingest_external_source_labels(raw_labels, Config)
 %
 %   接收外部输入的源类型标签，校验后输出结构化标签表。
-%   新框架下，源类型不再由 M3 内部判别，而是完全由外部输入。
+%   新框架下使用数字标签：1=persistent_cal, 2=broadband_cal, 3=target, 4=opportunistic
 %
 %   输入：
 %     raw_labels - struct array，每个元素至少包含：
-%       .source_uid      - 外部源唯一标识（字符串或数字）
+%       .source_uid      - 外部源唯一标识
 %       .band_id         - 频带编号
-%       .source_kind     - 源类型: 'trusted' / 'prior_pos' / 'prior_time' / 'ordinary'
+%       .label           - 数字标签 (1/2/3/4)
 %       .start_frame     - 生效起始帧
 %       .end_frame       - 生效结束帧
 %     可选字段：
-%       .position_hint   - [x, y] 若外部已知位置
-%       .template_key    - 若外部已知模板键
-%       .metadata        - 任意扩展字段
-%
-%     Config - 全局配置
-%
-%   输出：
-%     LabelTable - 校验通过的结构化标签表（struct array）
+%       .position_hint   - [x, y]
+%       .template_key    - 模板键
+%       .location_prior  - struct(.type, .value)
+%       .power_prior     - struct(.type, .value)
+%       .metadata        - 扩展字段
 
     if nargin < 2, Config = struct(); end
 
-    valid_kinds = {'trusted', 'prior_pos', 'prior_time', 'ordinary'};
+    LC = source_label_constants();
     T_total = 500;
     B_total = 4;
     if isfield(Config, 'm0')
@@ -47,19 +44,17 @@ function LabelTable = ingest_external_source_labels(raw_labels, Config)
     for i = 1:n
         lbl = raw_labels(i);
 
-        % --- 必填字段校验 ---
-        [ok, reason] = validate_single_label(lbl, valid_kinds, B_total, T_total);
+        [ok, reason] = validate_single_label(lbl, LC.ALL_LABELS, B_total, T_total);
         if ~ok
             fprintf('[ExternalLabels] 标签 #%d 被拒: %s\n', i, reason);
             n_reject = n_reject + 1;
             continue;
         end
 
-        % --- 构建标准化条目 ---
         entry = struct();
         entry.source_uid  = ensure_string(lbl.source_uid);
         entry.band_id     = lbl.band_id;
-        entry.source_kind = lower(strtrim(lbl.source_kind));
+        entry.label       = lbl.label;
         entry.start_frame = round(lbl.start_frame);
         entry.end_frame   = round(lbl.end_frame);
 
@@ -73,6 +68,18 @@ function LabelTable = ingest_external_source_labels(raw_labels, Config)
             entry.template_key = char(lbl.template_key);
         else
             entry.template_key = '';
+        end
+
+        if isfield(lbl, 'location_prior') && isstruct(lbl.location_prior)
+            entry.location_prior = lbl.location_prior;
+        else
+            entry.location_prior = struct('type', 'none', 'value', []);
+        end
+
+        if isfield(lbl, 'power_prior') && isstruct(lbl.power_prior)
+            entry.power_prior = lbl.power_prior;
+        else
+            entry.power_prior = struct('type', 'none', 'value', []);
         end
 
         if isfield(lbl, 'metadata')
@@ -89,26 +96,36 @@ function LabelTable = ingest_external_source_labels(raw_labels, Config)
         end
     end
 
+    lc_names = LC.name_map;
     fprintf('[ExternalLabels] 输入 %d 条, 接受 %d 条, 拒绝 %d 条\n', n, n_valid, n_reject);
+    if n_valid > 0
+        labels = [LabelTable.label];
+        for lb = LC.ALL_LABELS
+            cnt = sum(labels == lb);
+            if cnt > 0
+                fprintf('  label=%d (%s): %d\n', lb, lc_names(lb), cnt);
+            end
+        end
+    end
 end
 
-
-%% ==================== 局部函数 ====================
 
 function tbl = init_empty_label_table()
     tbl = struct( ...
         'source_uid',    {}, ...
         'band_id',       {}, ...
-        'source_kind',   {}, ...
+        'label',         {}, ...
         'start_frame',   {}, ...
         'end_frame',     {}, ...
         'position_hint', {}, ...
         'template_key',  {}, ...
+        'location_prior',{}, ...
+        'power_prior',   {}, ...
         'metadata',      {});
 end
 
 
-function [ok, reason] = validate_single_label(lbl, valid_kinds, B_total, T_total)
+function [ok, reason] = validate_single_label(lbl, valid_labels, B_total, T_total)
     ok = true;
     reason = '';
 
@@ -118,8 +135,8 @@ function [ok, reason] = validate_single_label(lbl, valid_kinds, B_total, T_total
     if ~isfield(lbl, 'band_id') || isempty(lbl.band_id)
         ok = false; reason = 'missing band_id'; return;
     end
-    if ~isfield(lbl, 'source_kind') || isempty(lbl.source_kind)
-        ok = false; reason = 'missing source_kind'; return;
+    if ~isfield(lbl, 'label') || isempty(lbl.label)
+        ok = false; reason = 'missing label'; return;
     end
     if ~isfield(lbl, 'start_frame') || isempty(lbl.start_frame)
         ok = false; reason = 'missing start_frame'; return;
@@ -128,9 +145,8 @@ function [ok, reason] = validate_single_label(lbl, valid_kinds, B_total, T_total
         ok = false; reason = 'missing end_frame'; return;
     end
 
-    kind = lower(strtrim(lbl.source_kind));
-    if ~any(strcmp(kind, valid_kinds))
-        ok = false; reason = sprintf('invalid source_kind: %s', kind); return;
+    if ~any(lbl.label == valid_labels)
+        ok = false; reason = sprintf('invalid label: %d', lbl.label); return;
     end
 
     bid = lbl.band_id;

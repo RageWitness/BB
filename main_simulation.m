@@ -44,6 +44,8 @@ sim_override.m4.fp_distance      = 'L2';          % L1 | L2
 
 % sim_override.m4.distance_mode = 'shape_scale';
 
+sim_override.debug.expose_true_source_state = true;
+
 
 [SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap(sim_override);
 
@@ -115,14 +117,10 @@ for t = 1:T
         apb = FrameState_t.active_per_band(b);
         if apb.has_source
             switch apb.source_type
-                case 'trusted_fixed',   occupancy_matrix(t, b) = 1;
-                case 'prior'
-                    if strcmp(apb.source_subtype, 'prior_pos_known')
-                        occupancy_matrix(t, b) = 2;
-                    else
-                        occupancy_matrix(t, b) = 3;
-                    end
-                case 'ordinary_target', occupancy_matrix(t, b) = 4;
+                case 'broadband_cal',  occupancy_matrix(t, b) = 1;
+                case 'opportunistic',  occupancy_matrix(t, b) = 2;
+                case 'target',         occupancy_matrix(t, b) = 4;
+                case 'persistent_cal', occupancy_matrix(t, b) = 3;
             end
         end
     end
@@ -130,7 +128,20 @@ end
 elapsed = toc;
 fprintf('主循环完成: %d 帧, 耗时 %.2f s (%.1f 帧/s)\n', T, elapsed, T/elapsed);
 
-%% ========== 第 2.5 阶段：外部源类型输入 + M4 定位 ==========
+%% ========== 第 2.5a 阶段：构建 DrivenSourceInput ==========
+
+fprintf('\n--- 构建 DrivenSourceInput ---\n');
+DSI_all = cell(T, B);
+for t = 1:T
+    for b = 1:B
+        DSI_all{t, b} = build_driven_source_input( ...
+            FrameStates{t}.active_per_band(b), Config);
+    end
+end
+n_dsi_active = sum(cellfun(@(d) d.label > 0, DSI_all), 'all');
+fprintf('[DSI] 构建完成: %d x %d 格, 有源 %d 格\n', T, B, n_dsi_active);
+
+%% ========== 第 2.5b 阶段：外部源类型输入 + M4 定位 ==========
 %
 %  新框架：M3 分类已断开，源类型由外部输入。
 %  当前从 M0 真值日志提取外部标签（仿真环境下的 oracle 模式）。
@@ -172,7 +183,7 @@ fprintf('  TruthLogAll   : %d 条\n', numel(M0Logs.TruthLogAll));
 fprintf('  TruthLogTarget: %d 条\n', numel(M0Logs.TruthLogTarget));
 
 % 频带占用统计
-type_names = {'空闲', 'trusted_fixed', 'prior_pos_known', 'prior_time_known', 'ordinary_target'};
+type_names = {'空闲', 'broadband_cal', 'opportunistic', 'persistent_cal', 'target'};
 fprintf('\n--- 各频带占用统计 (帧数 / %d) ---\n', T);
 fprintf('  %-6s', 'Band');
 for ti = 1:5
@@ -192,10 +203,12 @@ end
 fprintf('\n--- 外部标签统计 ---\n');
 fprintf('  标签总数: %d\n', SourceContext.n_labels);
 if ~isempty(LabelTable)
-    kinds = {LabelTable.source_kind};
-    fprintf('  trusted: %d, prior_pos: %d, prior_time: %d, ordinary: %d\n', ...
-        sum(strcmp(kinds, 'trusted')), sum(strcmp(kinds, 'prior_pos')), ...
-        sum(strcmp(kinds, 'prior_time')), sum(strcmp(kinds, 'ordinary')));
+    LC_stat = source_label_constants();
+    labels_arr = [LabelTable.label];
+    for lb = LC_stat.ALL_LABELS
+        cnt = sum(labels_arr == lb);
+        fprintf('  label=%d (%s): %d\n', lb, LC_stat.name_map(lb), cnt);
+    end
 end
 
 % RSS 统计
@@ -268,13 +281,13 @@ if ~isempty(M0Logs.TruthLogAll)
     all_ids   = [M0Logs.TruthLogAll.instance_id];
     all_keys  = {M0Logs.TruthLogAll.template_key};
 
-    mask_tr = strcmp(all_types, 'trusted_fixed');
+    mask_tr = strcmp(all_types, 'broadband_cal');
     h_tr = plot_unique_sources(all_xy, all_ids, mask_tr, 'p', [0.2 0.5 1], 16);
-    mask_pp = strncmp(all_keys, 'prior_pos_', 10);
+    mask_pp = strcmp(all_types, 'persistent_cal');
     h_pp = plot_unique_sources(all_xy, all_ids, mask_pp, 's', [0 0.8 0.4], 10);
-    mask_pt = strncmp(all_keys, 'prior_time_', 11);
+    mask_pt = strcmp(all_types, 'opportunistic');
     h_pt = plot_unique_sources(all_xy, all_ids, mask_pt, 'd', [1 0.7 0], 9);
-    mask_tg = strcmp(all_types, 'ordinary_target');
+    mask_tg = strcmp(all_types, 'target');
     h_tg = plot_unique_sources(all_xy, all_ids, mask_tg, 'o', [0.1 0.2 0.2], 7);
 end
 
@@ -287,10 +300,10 @@ leg_h{end+1} = plot(NaN, NaN, '.', 'Color', [0.85 0.85 0.85], 'MarkerSize', 10);
 leg_s{end+1} = '有效网格点';
 leg_h{end+1} = plot(NaN, NaN, 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
 leg_s{end+1} = 'AP';
-if ~isempty(h_tr), leg_h{end+1} = h_tr; leg_s{end+1} = 'trusted\_fixed'; end
-if ~isempty(h_pp), leg_h{end+1} = h_pp; leg_s{end+1} = 'prior\_pos\_known'; end
-if ~isempty(h_pt), leg_h{end+1} = h_pt; leg_s{end+1} = 'prior\_time\_known'; end
-if ~isempty(h_tg), leg_h{end+1} = h_tg; leg_s{end+1} = 'ordinary\_target'; end
+if ~isempty(h_tr), leg_h{end+1} = h_tr; leg_s{end+1} = 'broadband\_cal'; end
+if ~isempty(h_pp), leg_h{end+1} = h_pp; leg_s{end+1} = 'persistent\_cal'; end
+if ~isempty(h_pt), leg_h{end+1} = h_pt; leg_s{end+1} = 'opportunistic'; end
+if ~isempty(h_tg), leg_h{end+1} = h_tg; leg_s{end+1} = 'target'; end
 legend([leg_h{:}], leg_s, 'Location', 'best');
 
 % ===== 图4：最后有源帧 RSS vs 距离 =====
@@ -322,9 +335,15 @@ if ~isempty(LocResults)
             continue;
         end
         switch lr.type_hat
-            case 'ordinary_target',  clr = [0.9 0.2 0.2];
-            case 'prior_time_known', clr = [1 0.7 0];
-            otherwise,               clr = [0.5 0.5 0.5];
+            case 'target'
+                clr = [0.9 0.2 0.2];
+                short_name = 'target';
+            case 'opportunistic'
+                clr = [1.0 0.7 0.0];
+                short_name = 'opp';
+            otherwise
+                clr = [0.5 0.5 0.5];
+                short_name = lr.type_hat;
         end
         plot(lr.true_pos_xy(1), lr.true_pos_xy(2), 'o', ...
             'Color', clr, 'MarkerSize', 8, 'MarkerFaceColor', clr);
@@ -332,7 +351,13 @@ if ~isempty(LocResults)
             'Color', clr*0.6, 'MarkerSize', 10, 'LineWidth', 2);
         plot([lr.true_pos_xy(1), lr.est_pos_xy(1)], ...
              [lr.true_pos_xy(2), lr.est_pos_xy(2)], ...
-             '-', 'Color', [clr, 0.4], 'LineWidth', 1);
+             '-', 'Color', min(1, clr*0.65 + 0.25), 'LineWidth', 1);
+        text(lr.true_pos_xy(1)+2, lr.true_pos_xy(2)+2, ...
+            sprintf('B%d %s', lr.band_id, short_name), ...
+            'Color', clr*0.75, 'FontSize', 8, 'FontWeight', 'bold');
+        text(lr.est_pos_xy(1)+2, lr.est_pos_xy(2)-4, ...
+            sprintf('B%d est', lr.band_id), ...
+            'Color', clr*0.55, 'FontSize', 8);
     end
     xlabel('X (m)'); ylabel('Y (m)');
     title('M4 WKNN 定位结果 (o=真值, x=估计)');
@@ -345,7 +370,7 @@ if ~isempty(LocResults)
     leg_h(4) = plot(NaN, NaN, 'o', 'Color', [1 0.7 0], 'MarkerSize', 8, 'MarkerFaceColor', [1 0.7 0]);
     leg_h(5) = plot(NaN, NaN, 'x', 'Color', [1 0.7 0]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
     hold off;
-    legend(leg_h, {'AP', 'target 真值', 'target 估计', 'prior\_time 真值', 'prior\_time 估计'}, ...
+    legend(leg_h, {'AP', 'target true', 'target est', 'opportunistic true', 'opportunistic est'}, ...
         'Location', 'best');
 end
 
@@ -424,8 +449,8 @@ if ~isempty(LocResults)
         end
 
         subplot(2, 3, 4);
-        type_list = {'ordinary_target', 'prior_time_known'};
-        type_short = {'target', 'prior\_time'};
+        type_list = {'target', 'opportunistic'};
+        type_short = {'target', 'opportunistic'};
         type_colors = [0.9 0.2 0.2; 1 0.7 0];
         hold on;
         legend_h = gobjects(0);
@@ -507,25 +532,28 @@ fprintf('============================================\n');
 %% ==================== 辅助函数 ====================
 
 function ExternalLabelsRaw = build_labels_from_truth_log(M0Logs, Config)
-% BUILD_LABELS_FROM_TRUTH_LOG  从 M0 真值日志提取外部标签（仿真 oracle 模式）
+% BUILD_LABELS_FROM_TRUTH_LOG  从 M0 真值日志提取外部标签（新标签体系）
 %
-%   在真实系统中，此函数应替换为外部接口读取。
+%   使用数字标签 (1/2/3/4)，直接从 source_type 映射。
+
+    LC = source_label_constants();
 
     ExternalLabelsRaw = struct( ...
         'source_uid',    {}, ...
         'band_id',       {}, ...
-        'source_kind',   {}, ...
+        'label',         {}, ...
         'start_frame',   {}, ...
         'end_frame',     {}, ...
         'position_hint', {}, ...
         'template_key',  {}, ...
+        'location_prior',{}, ...
+        'power_prior',   {}, ...
         'metadata',      {});
 
     if isempty(M0Logs.TruthLogAll)
         return;
     end
 
-    % 按 (template_key, band_id) 分组，合并帧范围
     logs = M0Logs.TruthLogAll;
     keys = {logs.template_key};
     bands = [logs.band_id];
@@ -533,55 +561,62 @@ function ExternalLabelsRaw = build_labels_from_truth_log(M0Logs, Config)
     types = {logs.source_type};
     positions = reshape([logs.true_pos_xy], 2, [])';
 
-    % 构建唯一 (key, band) 组合
+    inst_ids = [logs.instance_id];
     combo_keys = {};
     for i = 1:numel(keys)
-        combo_keys{i} = sprintf('%s__b%d', keys{i}, bands(i)); %#ok<AGROW>
+        combo_keys{i} = sprintf('%s__inst%d__b%d', types{i}, inst_ids(i), bands(i)); %#ok<AGROW>
     end
     [unique_combos, ~, ic] = unique(combo_keys);
 
     for j = 1:numel(unique_combos)
         idx = find(ic == j);
-        lbl = struct();
-        lbl.source_uid = unique_combos{j};
-        lbl.band_id = bands(idx(1));
-        lbl.start_frame = min(frames(idx));
-        lbl.end_frame = max(frames(idx));
-        lbl.position_hint = positions(idx(1), :);
-        lbl.template_key = keys{idx(1)};
-        lbl.metadata = struct();
+        [seg_frames, ord] = sort(frames(idx));
+        idx = idx(ord);
+        break_pos = [0, find(diff(seg_frames) > 1), numel(seg_frames)];
 
-        src_type = types{idx(1)};
-        switch src_type
-            case 'trusted_fixed',   lbl.source_kind = 'trusted';
-            case 'ordinary_target', lbl.source_kind = 'ordinary';
-            case 'prior'
-                tkey = keys{idx(1)};
-                if contains(tkey, 'prior_pos')
-                    lbl.source_kind = 'prior_pos';
-                elseif contains(tkey, 'prior_time')
-                    lbl.source_kind = 'prior_time';
-                else
-                    lbl.source_kind = 'ordinary';
-                end
-            otherwise
-                lbl.source_kind = 'ordinary';
-        end
+        for si = 1:numel(break_pos)-1
+            seg_idx = idx((break_pos(si)+1):break_pos(si+1));
+            lbl = struct();
+            lbl.source_uid = sprintf('%s__seg%d', unique_combos{j}, si);
+            lbl.band_id = bands(seg_idx(1));
+            lbl.start_frame = min(frames(seg_idx));
+            lbl.end_frame = max(frames(seg_idx));
+            lbl.position_hint = positions(seg_idx(1), :);
+            lbl.template_key = keys{seg_idx(1)};
+            lbl.metadata = struct( ...
+                'instance_id', inst_ids(seg_idx(1)), ...
+                'source_type', types{seg_idx(1)}, ...
+                'n_frames', numel(seg_idx));
 
-        if isempty(ExternalLabelsRaw)
-            ExternalLabelsRaw = lbl;
-        else
-            ExternalLabelsRaw(end+1) = lbl; %#ok<AGROW>
+            src_type = types{seg_idx(1)};
+            if LC.type_to_label.isKey(src_type)
+                lbl.label = LC.type_to_label(src_type);
+            else
+                lbl.label = LC.TARGET;
+            end
+
+            lbl.location_prior = struct('type', 'none', 'value', []);
+            lbl.power_prior    = struct('type', 'none', 'value', []);
+
+            if lbl.label == LC.PERSISTENT_CAL || lbl.label == LC.BROADBAND_CAL
+                lbl.location_prior = struct('type', 'exact', 'value', lbl.position_hint);
+                lbl.power_prior    = struct('type', 'exact', 'value', logs(seg_idx(1)).tx_power_dBm);
+            end
+
+            if isempty(ExternalLabelsRaw)
+                ExternalLabelsRaw = lbl;
+            else
+                ExternalLabelsRaw(end+1) = lbl; %#ok<AGROW>
+            end
         end
     end
 end
 
 
 function EventList = build_event_list_from_context(SourceContext, Y_dBm_all, Y_lin_all, Config)
-% BUILD_EVENT_LIST_FROM_CONTEXT  从 SourceContext 构建 M4 兼容的 EventList
-%
-%   过渡函数：将外部标签转成 M4 能理解的 EventList 结构。
-%   后续 M4 改造完成后可直接消费 SourceContext。
+% BUILD_EVENT_LIST_FROM_CONTEXT  从 SourceContext 构建 M4 兼容的 EventList（新标签体系）
+
+    LC = source_label_constants();
 
     EventList = [];
     if isempty(SourceContext.label_table)
@@ -590,18 +625,6 @@ function EventList = build_event_list_from_context(SourceContext, Y_dBm_all, Y_l
     end
 
     [M_ap, ~, ~] = size(Y_dBm_all);
-
-    kind_to_type = struct( ...
-        'trusted',    'trusted_fixed', ...
-        'prior_pos',  'prior_pos_known', ...
-        'prior_time', 'prior_time_known', ...
-        'ordinary',   'ordinary_target');
-
-    kind_to_route = struct( ...
-        'trusted',    'calibrate_direct', ...
-        'prior_pos',  'calibrate_direct', ...
-        'prior_time', 'localize_then_calibrate', ...
-        'ordinary',   'localize_only');
 
     for i = 1:numel(SourceContext.label_table)
         lbl = SourceContext.label_table(i);
@@ -623,15 +646,14 @@ function EventList = build_event_list_from_context(SourceContext, Y_dBm_all, Y_l
             ev.obs_segment_lin = ev.obs_segment_lin(:);
         end
 
-        % 源类型（来自外部标签，不是 M3 判别）
-        kind = lbl.source_kind;
-        if isfield(kind_to_type, kind)
-            ev.type_hat = kind_to_type.(kind);
+        ev.label = lbl.label;
+        if LC.name_map.isKey(lbl.label)
+            ev.type_hat = LC.name_map(lbl.label);
         else
             ev.type_hat = 'unknown';
         end
-        if isfield(kind_to_route, kind)
-            ev.route_action = kind_to_route.(kind);
+        if LC.route_map.isKey(lbl.label)
+            ev.route_action = LC.route_map(lbl.label);
         else
             ev.route_action = 'hold';
         end
@@ -641,7 +663,6 @@ function EventList = build_event_list_from_context(SourceContext, Y_dBm_all, Y_l
         ev.hold_reason = '';
         ev.upgrade_hint = 'none';
 
-        % 基础功率特征（M4 需要）
         P_bar = mean(ev.obs_segment_dBm, 2);
         ev.power_level_est = mean(P_bar);
         if ev.duration > 1
@@ -650,7 +671,6 @@ function EventList = build_event_list_from_context(SourceContext, Y_dBm_all, Y_l
             ev.power_stability_est = 0;
         end
 
-        % M4 兼容字段
         ev.score_trusted = 0;
         ev.score_prior_pos = 0;
         ev.score_prior_time = 0;

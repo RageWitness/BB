@@ -1,9 +1,8 @@
 function [M0State, TargetCandidatesPerBand] = update_target_instances_m0( ...
-    M0State, SourceTemplates, GridValid, Config, t)
-% UPDATE_TARGET_INSTANCES_M0  更新 ordinary_target 的到达、位置、功率、寿命
+    M0State, SourceTemplates, GridValid, Config)
+% UPDATE_TARGET_INSTANCES_M0  待定位源的到达、位置、功率、寿命（每频带一路）
 %
-%   实例创建时绑定模板的 position_prior, time_prior, upgrade_potential 等。
-%   候选输出同样携带完整先验对象。
+%   输出 TargetCandidatesPerBand(b).candidates 为 0 或 1 个候选（新 SourceEvent 片段）
 
     B = Config.m0.num_bands;
     dt = Config.m0.dt;
@@ -13,78 +12,57 @@ function [M0State, TargetCandidatesPerBand] = update_target_instances_m0( ...
     end
 
     for b = 1:B
-        if M0State.target_active_band(b)
-            % --- 当前有持续中的目标：寿命减 1 ---
-            M0State.target_life_band(b) = M0State.target_life_band(b) - 1;
+        was_active = M0State.target_active_band(b);
 
-            inst_id = M0State.target_inst_band(b);
-            for k = 1:numel(M0State.instances)
-                if M0State.instances(k).instance_id == inst_id
-                    M0State.instances(k).life_remaining = M0State.target_life_band(b);
-                    if M0State.target_life_band(b) <= 0
-                        M0State.instances(k).is_active = false;
-                        M0State.target_active_band(b) = false;
-                        M0State.target_inst_band(b) = 0;
-                    end
-                    break;
-                end
+        if was_active
+            M0State.target_life_band(b) = M0State.target_life_band(b) - 1;
+            if M0State.target_life_band(b) <= 0
+                M0State.target_active_band(b) = false;
+                M0State.target_inst_band(b) = 0;
             end
         end
 
         if M0State.target_active_band(b)
-            % 仍然活跃，构造候选（从实例读取全部先验字段）
+            % 从实例池拿出对应实例
             inst_id = M0State.target_inst_band(b);
-            for k = 1:numel(M0State.instances)
-                if M0State.instances(k).instance_id == inst_id
-                    cand = build_target_candidate(M0State.instances(k), 0, true);
-                    TargetCandidatesPerBand(b).candidates = cand;
-                    break;
-                end
+            inst = find_instance(M0State, inst_id);
+            if ~isempty(inst)
+                TargetCandidatesPerBand(b).candidates = build_target_candidate( ...
+                    inst, b, 0, true);
             end
         else
-            % --- 当前无目标：尝试泊松到达 ---
+            % 尝试到达（从模板池中选一个候选）
             Nocoop_b = Config.m0.target.Nocoop(b);
             for n = 1:Nocoop_b
                 tpl = SourceTemplates.target(b, n);
-                p_arrive = 1 - exp(-tpl.lambda_arrival * dt);
-
-                if rand() < p_arrive
+                p = 1 - exp(-tpl.lambda_arrival * dt);
+                if rand() < p
                     pos_xy = sample_position(GridValid, tpl.position_mode);
                     power  = sample_power(tpl.tx_power_range_dBm);
                     life   = sample_target_life(tpl.life_mode, tpl.life_param, Config);
 
-                    % 创建实例（含完整先验对象）
-                    inst.instance_id           = M0State.next_instance_id;
-                    inst.template_key          = tpl.template_key;
-                    inst.source_type           = 'ordinary_target';
-                    inst.source_subtype        = 'ordinary_target';
-                    inst.band_id_list          = b;
-                    inst.true_pos_xy           = pos_xy;
-                    inst.tx_power_dBm          = power;
-                    inst.life_remaining        = life;
-                    inst.is_active             = true;
-                    inst.position_prior        = tpl.position_prior;   % mode='unknown'
-                    inst.time_prior            = tpl.time_prior;       % mode='unknown'
-                    inst.power_nominal_dBm     = tpl.power_nominal_dBm;
-                    inst.power_range_dBm       = tpl.power_range_dBm;
-                    inst.power_stability_level = tpl.power_stability_level;
-                    inst.credibility_prior     = tpl.credibility_prior;
-                    inst.upgrade_potential     = tpl.upgrade_potential;
+                    inst = struct();
+                    inst.instance_id      = M0State.next_instance_id;
+                    inst.template_key     = tpl.template_key;
+                    inst.source_type      = 'target';
+                    inst.band_list        = b;
+                    inst.true_position    = pos_xy;
+                    inst.true_tx_power    = power;
+                    inst.tx_power_by_band = [];
+                    inst.location_prior   = struct('type','none','value', []);
+                    inst.power_prior      = struct('type','none','value', []);
+                    inst.life_remaining   = life;
+                    inst.is_active        = true;
 
                     M0State.next_instance_id = M0State.next_instance_id + 1;
-                    if isempty(M0State.instances)
-                        M0State.instances = inst;
-                    else
-                        M0State.instances(end+1) = inst; %#ok<AGROW>
-                    end
+                    M0State.instances = append_instance(M0State.instances, inst);
 
                     M0State.target_active_band(b) = true;
                     M0State.target_life_band(b)   = life;
                     M0State.target_inst_band(b)   = inst.instance_id;
 
-                    cand = build_target_candidate(inst, n, false);
-                    TargetCandidatesPerBand(b).candidates = cand;
-
+                    TargetCandidatesPerBand(b).candidates = build_target_candidate( ...
+                        inst, b, n, false);
                     break;
                 end
             end
@@ -93,23 +71,41 @@ function [M0State, TargetCandidatesPerBand] = update_target_instances_m0( ...
 end
 
 
-function cand = build_target_candidate(inst, template_idx, is_continuing)
-% BUILD_TARGET_CANDIDATE  从实例构造带先验对象的 target 候选
-    cand.instance_id           = inst.instance_id;
-    cand.template_key          = inst.template_key;
-    cand.source_type           = 'ordinary_target';
-    cand.source_subtype        = 'ordinary_target';
-    cand.true_pos_xy           = inst.true_pos_xy;
-    cand.tx_power_dBm          = inst.tx_power_dBm;
-    cand.template_idx          = template_idx;
-    cand.is_continuing         = is_continuing;
-    cand.position_prior        = inst.position_prior;
-    cand.time_prior            = inst.time_prior;
-    cand.power_nominal_dBm     = inst.power_nominal_dBm;
-    cand.power_range_dBm       = inst.power_range_dBm;
-    cand.power_stability_level = inst.power_stability_level;
-    cand.credibility_prior     = inst.credibility_prior;
-    cand.upgrade_potential     = inst.upgrade_potential;
+function cand = build_target_candidate(inst, b, template_idx, is_continuing)
+    cand.instance_id      = inst.instance_id;
+    cand.template_key     = inst.template_key;
+    cand.source_type      = 'target';
+    cand.source_subtype   = 'target';
+    cand.band_list        = b;
+    cand.band_id          = b;
+    cand.true_position    = inst.true_position;
+    cand.true_tx_power    = inst.true_tx_power;
+    cand.tx_power_by_band = [];
+    cand.is_continuing    = is_continuing;
+    cand.template_idx     = template_idx;
+    cand.is_persistent    = false;
+    cand.location_prior   = inst.location_prior;
+    cand.power_prior      = inst.power_prior;
+end
+
+
+function inst = find_instance(M0State, inst_id)
+    inst = [];
+    for k = 1:numel(M0State.instances)
+        if M0State.instances(k).instance_id == inst_id
+            inst = M0State.instances(k);
+            return;
+        end
+    end
+end
+
+
+function arr = append_instance(arr, inst)
+    if isempty(arr)
+        arr = inst;
+    else
+        arr(end+1) = inst;
+    end
 end
 
 
@@ -146,8 +142,7 @@ function life = sample_target_life(mode, param, Config)
             L_range = Config.m0.target.life_range;
             life = randi([L_range(1), L_range(2)]);
         case 'exp'
-            dt = Config.m0.dt;
-            life = max(1, ceil(exprnd(param) / dt));
+            life = max(1, ceil(exprnd(param) / Config.m0.dt));
         otherwise
             life = 10;
     end

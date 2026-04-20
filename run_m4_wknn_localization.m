@@ -404,7 +404,7 @@ function print_loc_summary(LocResults)
         fprintf('  P95 误差: %.2f m\n', prctile(errors, 95));
 
         types_loc = {LocResults.type_hat};
-        for type_cell = {'ordinary_target', 'prior_time_known'}
+        for type_cell = {'target', 'opportunistic'}
             type_name = type_cell{1};
             mask = strcmp(types_loc, type_name);
             errs = [LocResults(mask).loc_error];
