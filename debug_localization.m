@@ -121,7 +121,7 @@ for t = 1:10:T  % 每 10 帧取一个
     for b = 1:B
         apb = FrameStates{t}.active_per_band(b);
         if ~apb.has_source, continue; end
-        if ~strcmp(apb.source_type, 'ordinary_target'), continue; end
+        if ~strcmp(apb.source_type, 'target'), continue; end
 
         % 直接取这一帧的观测（线性域）
         F_obs_direct = Y_lin_all(:, b, t);
@@ -245,53 +245,79 @@ for b = 1:B
         b, Bands.model{b}, format_bw(bw), n0, N_dBm);
 end
 
-% 4b. 逐帧逐频带采集 SNR 样本（用 ObsFrames.meta 中的真实接收信号功率）
-fprintf('\n  [逐频带 SNR 统计 — 仅有源帧]\n');
-fprintf('  SNR = rx_signal_dBm (接收信号功率,含衰落) - N_dBm (噪声总功率)\n\n');
-snr_samples = cell(1, B);
+% 4b. 逐帧逐频带 SNR 统计（仅已定位事件覆盖的帧，多种 bottom-K AP 均值）
+fprintf('\n  [逐频带 SNR 统计 — 仅已定位事件, bottom-K AP 均值]\n');
+fprintf('  SNR_bK = mean( bottom-K AP 的 rx_dBm - N_dBm )\n\n');
+K_list = [3, 4, 5, 6, 7];
+snr_per_frame_bk = cell(numel(K_list), B);  % {ki, b} = vector of per-frame bottom-K SNR
+snr_all_ap    = cell(1, B);
 rx_sig_samples = cell(1, B);
 noise_samples = cell(1, B);
 pl_samples = cell(1, B);
 
+% 构建已定位事件覆盖的 (t, b) 集合
+loc_tb_set = false(T, B);
+for k = 1:numel(LocResults)
+    lr = LocResults(k);
+    tr = lr.time_range;
+    b_lr = lr.band_id;
+    for t = max(1, tr(1)) : min(T, tr(2))
+        loc_tb_set(t, b_lr) = true;
+    end
+end
+
 for t = 1:T
     for b = 1:B
+        if ~loc_tb_set(t, b), continue; end
         meta_b = ObsFrames{t}.meta.active_per_band(b);
         if ~meta_b.has_source, continue; end
 
-        % 从 M1 记录的真实值取接收信号功率（含路径损耗+阴影，不含 AWGN）
         rx_sig = meta_b.rx_signal_dBm_per_ap;   % M x 1
         N_dBm  = meta_b.noise_power_dBm;        % 标量
 
-        % 正确的 SNR：接收信号功率 / 噪声功率
         snr_per_ap = rx_sig(:) - N_dBm;          % M x 1, dB
-        snr_samples{b}    = [snr_samples{b};    snr_per_ap];
+        snr_sorted = sort(snr_per_ap, 'ascend');
+
+        for ki = 1:numel(K_list)
+            kb = min(K_list(ki), numel(snr_sorted));
+            snr_bk = mean(snr_sorted(1:kb));
+            snr_per_frame_bk{ki, b} = [snr_per_frame_bk{ki, b}; snr_bk];
+        end
+
+        snr_all_ap{b}    = [snr_all_ap{b};    snr_per_ap];
         rx_sig_samples{b} = [rx_sig_samples{b}; rx_sig(:)];
         noise_samples{b}  = [noise_samples{b};  N_dBm];
         pl_samples{b}     = [pl_samples{b};     meta_b.pathloss_dB_per_ap(:)];
     end
 end
 
-fprintf('  %-6s %-10s %-12s %-10s %-10s %-10s %-14s %-14s %-14s\n', ...
-    'Band', 'Model', 'N_noise(dBm)', 'N_samples', 'SNR_mean', 'SNR_med', ...
-    'SNR<0(%)', 'RxSig_mean', 'PL_mean(dB)');
-for b = 1:B
-    if isempty(snr_samples{b}), continue; end
-    snr = snr_samples{b};
-    rx  = rx_sig_samples{b};
-    pl  = pl_samples{b};
-    % 噪声功率（取第一个值即可，同频带内固定）
-    N_val = noise_samples{b}(1);
-    fprintf('  %-6d %-10s %-12.1f %-10d %-10.1f %-10.1f %-14.1f %-14.1f %-14.1f\n', ...
-        b, Bands.model{b}, N_val, numel(snr), mean(snr), median(snr), ...
-        100*sum(snr < 0)/numel(snr), mean(rx), mean(pl));
+for ki = 1:numel(K_list)
+    K_bottom = K_list(ki);
+    fprintf('  --- bottom-%d AP ---\n', K_bottom);
+    fprintf('  %-6s %-10s %-12s %-10s %-14s %-14s %-14s %-14s %-14s\n', ...
+        'Band', 'Model', 'N_noise(dBm)', 'N_frames', ...
+        sprintf('SNR_b%d_mean', K_bottom), sprintf('SNR_b%d_med', K_bottom), ...
+        sprintf('SNR_b%d<0(%%)', K_bottom), 'RxSig_mean', 'PL_mean(dB)');
+    for b = 1:B
+        if isempty(snr_per_frame_bk{ki, b}), continue; end
+        snr_fm = snr_per_frame_bk{ki, b};
+        rx  = rx_sig_samples{b};
+        pl  = pl_samples{b};
+        N_val = noise_samples{b}(1);
+        pct_neg = 100 * sum(snr_fm < 0) / numel(snr_fm);
+        fprintf('  %-6d %-10s %-12.1f %-10d %-14.1f %-14.1f %-14.1f %-14.1f %-14.1f\n', ...
+            b, Bands.model{b}, N_val, numel(snr_fm), mean(snr_fm), median(snr_fm), ...
+            pct_neg, mean(rx), mean(pl));
+    end
+    fprintf('\n');
 end
 
 % 4c. SNR 分布直方图
 figure('Name', 'SNR 诊断', 'Position', [100 100 1200 500]);
 for b = 1:B
-    if isempty(snr_samples{b}), continue; end
+    if isempty(snr_all_ap{b}), continue; end
     subplot(1, B, b);
-    histogram(snr_samples{b}, 30, 'FaceColor', [0.3 0.6 0.9]);
+    histogram(snr_all_ap{b}, 30, 'FaceColor', [0.3 0.6 0.9]);
     hold on;
     xline(0, 'r--', 'SNR=0', 'LineWidth', 2);
     hold off;
@@ -339,6 +365,71 @@ for b = 1:B
     set(gca, 'XTick', 1:4:M);
 end
 sgtitle('各频带 接收信号 / AWGN观测 / 噪声底  逐AP分解');
+
+%% 5. 逐事件 SNR vs 定位误差（bottom-5 AP 均值）
+fprintf('\n\n--- 5. 逐事件 SNR vs 定位误差 (bottom-5 AP) ---\n');
+fprintf('  %-8s %-6s %-12s %-14s %-14s %-12s %-10s\n', ...
+    'EventID', 'Band', 'Type', 'SNR_b5_mean', 'SNR_b5_min', 'Error(m)', 'Route');
+
+K_bottom_ev = 5;
+ev_snr_list  = [];
+ev_err_list  = [];
+ev_band_list = [];
+for k = 1:numel(LocResults)
+    lr = LocResults(k);
+    b  = lr.band_id;
+    tr = lr.time_range;
+
+    % 计算该事件时间窗内的 bottom-5 AP SNR
+    snr_frames = [];
+    for t = max(1, tr(1)) : min(T, tr(2))
+        meta_b = ObsFrames{t}.meta.active_per_band(b);
+        if ~meta_b.has_source, continue; end
+        snr_per_ap = meta_b.rx_signal_dBm_per_ap(:) - meta_b.noise_power_dBm;
+        snr_sorted = sort(snr_per_ap, 'ascend');
+        kb = min(K_bottom_ev, numel(snr_sorted));
+        snr_frames(end+1) = mean(snr_sorted(1:kb)); %#ok<AGROW>
+    end
+    if isempty(snr_frames)
+        ev_snr_mean = NaN;
+        ev_snr_min  = NaN;
+    else
+        ev_snr_mean = mean(snr_frames);
+        ev_snr_min  = min(snr_frames);
+    end
+
+    err_str = 'N/A';
+    if ~isnan(lr.loc_error)
+        err_str = sprintf('%.2f', lr.loc_error);
+        ev_snr_list(end+1)  = ev_snr_mean; %#ok<AGROW>
+        ev_err_list(end+1)  = lr.loc_error; %#ok<AGROW>
+        ev_band_list(end+1) = b;            %#ok<AGROW>
+    end
+
+    fprintf('  %-8d %-6d %-12s %-14.1f %-14.1f %-12s %-10s\n', ...
+        lr.event_id, b, lr.type_hat, ev_snr_mean, ev_snr_min, err_str, lr.route_action);
+end
+
+% 散点图：SNR vs 定位误差
+if ~isempty(ev_snr_list)
+    figure('Name', 'SNR vs 定位误差', 'Position', [200 200 800 500]);
+    band_colors_5 = lines(B);
+    hold on;
+    leg_str_5 = {};
+    for b = 1:B
+        mask_b = (ev_band_list == b);
+        if ~any(mask_b), continue; end
+        scatter(ev_snr_list(mask_b), ev_err_list(mask_b), 40, ...
+            band_colors_5(b,:), 'filled', 'MarkerFaceAlpha', 0.7);
+        leg_str_5{end+1} = sprintf('Band %d', b); %#ok<AGROW>
+    end
+    hold off;
+    xlabel('事件平均 SNR (dB)'); ylabel('定位误差 (m)');
+    title('SNR vs 定位误差 (逐事件)');
+    legend(leg_str_5, 'Location', 'best');
+    grid on;
+    set(gca, 'YScale', 'log');
+end
 
 fprintf('\n===== 诊断完成 =====\n');
 

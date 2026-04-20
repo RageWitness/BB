@@ -36,7 +36,7 @@ sim_override.fp.grid_step = 3;   % 3m grid
 
 % --- 指纹库缓存开关 ---
 fp_cache_enable = true;                          % true: 命中即加载、未命中则构建并保存
-fp_cache_file   = 'cache/SpatialFP_mwm.mat';
+fp_cache_file   = 'cache/SpatialFP_mwm_awgn.mat';
 
 % --- M4 匹配指纹类型选择 ---
 sim_override.m4.fingerprint_type = 'centered_dBm';   % rf_minmax | rf_raw | shape_l1 | centered_dBm | legacy

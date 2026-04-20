@@ -99,7 +99,7 @@ function Config = default_config_m0()
     Config.m0.source.opportunistic.life_mode        = 'geom';
     Config.m0.source.opportunistic.life_param       = 0.08;
     Config.m0.source.opportunistic.life_range       = [5, 30];
-    Config.m0.source.opportunistic.power_range_dBm  = [70, 90];
+    Config.m0.source.opportunistic.power_range_dBm  = [85, 90];
     Config.m0.source.opportunistic.gaussian.sigma_default = 5.0;
     Config.m0.source.opportunistic.region.building_pool   = 'all';
     Config.m0.source.opportunistic.region.max_resample    = 20;
@@ -111,10 +111,10 @@ function Config = default_config_m0()
     Config.m0.target.life_mode = 'geom';
     Config.m0.target.life_param = 0.08;
     Config.m0.target.life_range = [5, 30];
-    Config.m0.target.power_range_dBm = [100, 100; ...
-                                        100, 100; ...
-                                        100, 100; ...
-                                        100, 100];
+    Config.m0.target.power_range_dBm = [80, 75; ...
+                                        80, 75; ...
+                                        20, 22; ...
+                                        21, 25];
     Config.m0.target.position_mode = 'uniform';
 
     % --- M3 配置（legacy，主链路已断开，新框架下不再使用） ---

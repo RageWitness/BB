@@ -79,7 +79,7 @@ function Config = fill_m1_defaults(Config)
     if ~isfield(Config.m1, 'noise')
         Config.m1.noise.mode           = 'psd_dBmHz';
         Config.m1.noise.n0_mode        = 'fixed';
-        Config.m1.noise.n0_dBmHz       = -174 * ones(1, B);
+        Config.m1.noise.n0_dBmHz       = -165 * ones(1, B);
         Config.m1.noise.noise_power_dBm = [];  % power_dBm 模式备用
         Config.m1.noise.sliding_rho    = 0.999;
         Config.m1.noise.sliding_sigma  = 0.5;

@@ -46,6 +46,32 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
         N_mc = Config.m25.n_mc_fp;
     end
 
+    % --- 噪声功率（每频带不同带宽） ---
+    N_dBm_per_band = zeros(1, B);
+    if isfield(Config, 'm1') && isfield(Config.m1, 'noise')
+        noise_cfg = Config.m1.noise;
+        if isfield(noise_cfg, 'mode') && strcmp(noise_cfg.mode, 'power_dBm') ...
+                && isfield(noise_cfg, 'noise_power_dBm')
+            for b = 1:B
+                N_dBm_per_band(b) = noise_cfg.noise_power_dBm(b);
+            end
+        else
+            n0_arr = -174 * ones(1, B);
+            if isfield(noise_cfg, 'n0_dBmHz')
+                n0_arr = noise_cfg.n0_dBmHz;
+                if isscalar(n0_arr), n0_arr = n0_arr * ones(1, B); end
+            end
+            for b = 1:B
+                N_dBm_per_band(b) = n0_arr(b) + 10 * log10(Bands.bw_Hz(b));
+            end
+        end
+    else
+        for b = 1:B
+            N_dBm_per_band(b) = -174 + 10 * log10(Bands.bw_Hz(b));
+        end
+    end
+    N_lin_per_band = 10.^(N_dBm_per_band / 10);
+
     for b = 1:B
         F_dBm   = zeros(M, G);
         F_lin   = zeros(M, G);
@@ -54,6 +80,8 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
 
         p_band  = get_channel_params(Bands.fc_Hz(b));
         sigma_b = p_band.sigma;
+        N_lin_b = N_lin_per_band(b);
+        noise_sigma_b = sqrt(N_lin_b);
 
         for g = 1:G
             PL_det = compute_pathloss_from_cache(g, Bands.fc_Hz(b), GeometryCache);
@@ -61,10 +89,14 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
             rss_dBm_samp = ref_power(b) - PL_det + xi;
             rss_lin_samp = 10.^(rss_dBm_samp / 10);
 
+            % AWGN: Y = S + N, N ~ N(0, N_lin)
+            awgn_noise = noise_sigma_b * randn(M, N_mc);
+            rss_lin_samp = max(rss_lin_samp + awgn_noise, 1e-20);
+
             rss_lin_mean = mean(rss_lin_samp, 2);
             F_dBm(:, g)   = 10 * log10(max(rss_lin_mean, 1e-20));
             F_lin(:, g)   = rss_lin_mean;
-            Std_dBm(:, g) = std(rss_dBm_samp, 0, 2);
+            Std_dBm(:, g) = std(10 * log10(max(rss_lin_samp, 1e-20)), 0, 2);
             Std_lin(:, g) = std(rss_lin_samp, 0, 2);
         end
 
@@ -75,6 +107,7 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
         band_fp.fc_Hz   = Bands.fc_Hz(b);
         band_fp.bw_Hz   = Bands.bw_Hz(b);
         band_fp.model   = Bands.model{b};
+        band_fp.noise_floor_dBm = N_dBm_per_band(b);
         band_fp.reference_power_dBm_used = ref_power(b);
 
         % 预计算 RF_raw / RF_minmax / F_shape_l1 / centered_dBm
@@ -82,8 +115,8 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
 
         SpatialFP.band(b) = band_fp;
 
-        fprintf('  Band %d (%s): F_dBm [%.1f, %.1f], F_lin [%.2e, %.2e]', ...
-            b, Bands.name{b}, min(F_dBm(:)), max(F_dBm(:)), ...
+        fprintf('  Band %d (%s): N_floor=%.1f dBm, F_dBm [%.1f, %.1f], F_lin [%.2e, %.2e]', ...
+            b, Bands.name{b}, N_dBm_per_band(b), min(F_dBm(:)), max(F_dBm(:)), ...
             min(F_lin(:)), max(F_lin(:)));
         if isfield(band_fp, 'RF_minmax')
             fprintf(', RF_minmax [%.3f, %.3f]', ...
