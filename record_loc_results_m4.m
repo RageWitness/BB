@@ -27,6 +27,52 @@ function loc_result = record_loc_results_m4(event, est_pos_xy, F_obs, ...
         loc_result.linked_template_key = '';
     end
 
+    % --- prior / metadata 透传 ---
+    if isfield(event, 'location_prior') && isstruct(event.location_prior)
+        loc_result.location_prior = event.location_prior;
+    else
+        loc_result.location_prior = struct('type', 'none', 'value', []);
+    end
+    if isfield(event, 'power_prior') && isstruct(event.power_prior)
+        loc_result.power_prior = event.power_prior;
+    else
+        loc_result.power_prior = struct('type', 'none', 'value', []);
+    end
+    if isfield(event, 'metadata')
+        loc_result.metadata = event.metadata;
+    else
+        loc_result.metadata = struct();
+    end
+
+    % 便利字段
+    if isfield(event, 'source_type_name')
+        loc_result.source_type_name = event.source_type_name;
+    else
+        loc_result.source_type_name = event.type_hat;
+    end
+    loc_result.location_prior_type = loc_result.location_prior.type;
+    loc_result.power_prior_type    = loc_result.power_prior.type;
+    if isfield(event, 'instance_id')
+        loc_result.instance_id = event.instance_id;
+    else
+        loc_result.instance_id = 0;
+    end
+    if isfield(event, 'is_calibration_source')
+        loc_result.is_calibration_source = event.is_calibration_source;
+    else
+        loc_result.is_calibration_source = false;
+    end
+    if isfield(event, 'is_target_source')
+        loc_result.is_target_source = event.is_target_source;
+    else
+        loc_result.is_target_source = false;
+    end
+    if isfield(event, 'is_opportunistic_source')
+        loc_result.is_opportunistic_source = event.is_opportunistic_source;
+    else
+        loc_result.is_opportunistic_source = false;
+    end
+
     % 观测与估计
     loc_result.obs_fp_lin   = F_obs;
     loc_result.obs_fp_dBm   = 10 * log10(max(F_obs, 1e-30));

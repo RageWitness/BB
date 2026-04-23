@@ -11,24 +11,42 @@ function SourceTemplates = build_source_templates_nonoverlap(Config, GridValid)
 
     %% ===== 1. broadband_cal（宽带标校源，覆盖所有频带） =====
     BC = Config.m0.source.broadband_cal;
-    for j = 1:BC.count
+
+    if isfield(BC, 'schedule_mode') && strcmp(BC.schedule_mode, 'manual')
+        % --- 手动调度模式 ---
+        sched = BC.manual_schedule;  % struct array: .frame_range [t1,t2], .pos_xy [x,y]
+        n_bc = numel(sched);
+    else
+        n_bc = BC.count;
+    end
+
+    for j = 1:n_bc
         tpl = struct();
         tpl.source_type        = 'broadband_cal';
         tpl.source_subtype     = 'broadband_cal';
         tpl.template_key       = sprintf('broadband_cal_%03d', j);
         tpl.band_list          = 1:B;
         tpl.band_id            = 0;                  % 0 表示全频带
-        tpl.lambda_arrival     = Config.m0.source.lambda_broadband;
-        tpl.life_mode          = BC.life_mode;
-        tpl.life_param         = BC.life_param;
 
-        % 功率：全频带统一功率（可扩展为每频带不同）
+        % 功率：全频带统一功率
         tpl.tx_power_dBm       = BC.tx_power_dBm;
         tpl.tx_power_by_band   = BC.tx_power_dBm * ones(1, B);
 
-        % 固定位置
-        idx = randi(GridValid.Nvalid);
-        tpl.fixed_pos_xy       = GridValid.xy(idx, :);
+        if isfield(BC, 'schedule_mode') && strcmp(BC.schedule_mode, 'manual')
+            tpl.schedule_mode      = 'manual';
+            tpl.frame_range        = sched(j).frame_range;   % [t_start, t_end]
+            tpl.fixed_pos_xy       = sched(j).pos_xy;        % [x, y]
+            tpl.lambda_arrival     = 0;
+            tpl.life_mode          = 'manual';
+            tpl.life_param         = 0;
+        else
+            tpl.schedule_mode      = 'poisson';
+            tpl.lambda_arrival     = Config.m0.source.lambda_broadband;
+            tpl.life_mode          = BC.life_mode;
+            tpl.life_param         = BC.life_param;
+            idx = randi(GridValid.Nvalid);
+            tpl.fixed_pos_xy       = GridValid.xy(idx, :);
+        end
 
         SourceTemplates.broadband_cal(j) = tpl;
     end

@@ -74,7 +74,7 @@ function Config = default_config_m0()
     % 优先级: 4                3              2       1 (保底)
     % ============================================================
     Config.m0.source.lambda_broadband     = 0.003;               % 宽带标校源（最低到达率）
-    Config.m0.source.lambda_opportunistic = 0.010;               % 机遇源
+    Config.m0.source.lambda_opportunistic = 0.025;               % 机遇源
     Config.m0.source.lambda_target        = [0.02 0.02 0.015 0.015];  % 待定位源（按频带）
     Config.m0.source.persistent_enable    = true;                % 是否启用持续标校源
 
@@ -86,7 +86,7 @@ function Config = default_config_m0()
     % 宽带标校源（covers all bands）
     Config.m0.source.broadband_cal.count            = 2;
     Config.m0.source.broadband_cal.life_mode        = 'geom';
-    Config.m0.source.broadband_cal.life_param       = 0.05;
+    Config.m0.source.broadband_cal.life_param       = 0.005;
     Config.m0.source.broadband_cal.tx_power_dBm     = 140;       % 每频带功率（标量则全频带相同）
 
     % 机遇源先验类型概率（三选一，和为 1）
@@ -96,10 +96,10 @@ function Config = default_config_m0()
     % 功率先验（exact 命中概率，未命中则 none）
     Config.m0.source.opportunistic.power_prior_prob.exact = 0.5;
     % 机遇源生命周期与功率
-    Config.m0.source.opportunistic.life_mode        = 'geom';
+    Config.m0.source.opportunistic.life_mode        = 'uniform';
     Config.m0.source.opportunistic.life_param       = 0.08;
-    Config.m0.source.opportunistic.life_range       = [5, 30];
-    Config.m0.source.opportunistic.power_range_dBm  = [85, 90];
+    Config.m0.source.opportunistic.life_range       = [8, 25];
+    Config.m0.source.opportunistic.power_range_dBm  = [90, 90];
     Config.m0.source.opportunistic.gaussian.sigma_default = 5.0;
     Config.m0.source.opportunistic.region.building_pool   = 'all';
     Config.m0.source.opportunistic.region.max_resample    = 20;
@@ -111,10 +111,10 @@ function Config = default_config_m0()
     Config.m0.target.life_mode = 'geom';
     Config.m0.target.life_param = 0.08;
     Config.m0.target.life_range = [5, 30];
-    Config.m0.target.power_range_dBm = [80, 75; ...
+    Config.m0.target.power_range_dBm = [10, 15; ...
+                                        10, 15; ...
                                         80, 75; ...
-                                        20, 22; ...
-                                        21, 25];
+                                        80, 75];
     Config.m0.target.position_mode = 'uniform';
 
     % --- M3 配置（legacy，主链路已断开，新框架下不再使用） ---

@@ -2,9 +2,12 @@ function [M0State, Candidates] = update_broadband_cal_instances_m0( ...
     M0State, SourceTemplates, Config)
 % UPDATE_BROADBAND_CAL_INSTANCES_M0  宽带标校源到达与寿命
 %
-%   覆盖所有频带；最高优先级；Poisson 到达 + geometric/exp 寿命。
+%   支持两种模式：
+%     'poisson' — Poisson 到达 + geometric/exp 寿命（原逻辑）
+%     'manual'  — 用户指定帧区间，区间内 active，区间外 inactive
 
     dt = Config.m0.dt;
+    t  = M0State.frame_id;
     BC_count = numel(SourceTemplates.broadband_cal);
 
     Candidates = [];
@@ -13,20 +16,39 @@ function [M0State, Candidates] = update_broadband_cal_instances_m0( ...
         tpl = SourceTemplates.broadband_cal(j);
         was_active = M0State.broadband_active(j);
 
-        if ~was_active
-            % 尝试 Poisson 到达
-            p = 1 - exp(-tpl.lambda_arrival * dt);
-            if rand() < p
+        is_manual = isfield(tpl, 'schedule_mode') && strcmp(tpl.schedule_mode, 'manual');
+
+        if is_manual
+            % --- 手动调度：帧区间判定 ---
+            in_range = (t >= tpl.frame_range(1)) && (t <= tpl.frame_range(2));
+
+            if in_range && ~was_active
                 M0State.broadband_active(j) = true;
-                M0State.broadband_life(j) = sample_life(tpl.life_mode, tpl.life_param, Config);
+                M0State.broadband_life(j)   = tpl.frame_range(2) - t + 1;
                 M0State.broadband_inst_id(j) = M0State.next_instance_id;
                 M0State.next_instance_id = M0State.next_instance_id + 1;
-            end
-        else
-            M0State.broadband_life(j) = M0State.broadband_life(j) - 1;
-            if M0State.broadband_life(j) <= 0
+            elseif in_range && was_active
+                M0State.broadband_life(j) = tpl.frame_range(2) - t + 1;
+            elseif ~in_range && was_active
                 M0State.broadband_active(j) = false;
                 M0State.broadband_inst_id(j) = 0;
+            end
+        else
+            % --- Poisson 到达 + 随机寿命（原逻辑）---
+            if ~was_active
+                p = 1 - exp(-tpl.lambda_arrival * dt);
+                if rand() < p
+                    M0State.broadband_active(j) = true;
+                    M0State.broadband_life(j) = sample_life(tpl.life_mode, tpl.life_param, Config);
+                    M0State.broadband_inst_id(j) = M0State.next_instance_id;
+                    M0State.next_instance_id = M0State.next_instance_id + 1;
+                end
+            else
+                M0State.broadband_life(j) = M0State.broadband_life(j) - 1;
+                if M0State.broadband_life(j) <= 0
+                    M0State.broadband_active(j) = false;
+                    M0State.broadband_inst_id(j) = 0;
+                end
             end
         end
 

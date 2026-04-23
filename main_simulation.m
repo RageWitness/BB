@@ -33,10 +33,15 @@ sim_override.ap.pos_xy = [
    75.6478  ,274.5550
 ];
 sim_override.fp.grid_step = 3;   % 3m grid
-
+sim_override.m0.source.broadband_cal.schedule_mode = 'manual';
+sim_override.m0.source.broadband_cal.manual_schedule = [
+    struct('frame_range', [110, 150],  'pos_xy', [120, 150]);
+    struct('frame_range', [300, 350],  'pos_xy', [75, 228]); 
+];
+sim_override.m0.source.broadband_cal.tx_power_dBm = 140;
 % --- 指纹库缓存开关 ---
 fp_cache_enable = true;                          % true: 命中即加载、未命中则构建并保存
-fp_cache_file   = 'cache/SpatialFP_mwm_awgn.mat';
+fp_cache_file   = 'cache/SpatialFP_mwm_awgn.mat';% mwm,mwm_awgn,mwm_awgn_new,mwm_Nl
 
 % --- M4 匹配指纹类型选择 ---
 sim_override.m4.fingerprint_type = 'centered_dBm';   % rf_minmax | rf_raw | shape_l1 | centered_dBm | legacy
@@ -147,10 +152,10 @@ fprintf('[DSI] 构建完成: %d x %d 格, 有源 %d 格\n', T, B, n_dsi_active);
 %  当前从 M0 真值日志提取外部标签（仿真环境下的 oracle 模式）。
 %  后续对接真实系统时，改为从外部接口读取。
 
-fprintf('\n--- 外部源类型标签输入 ---\n');
+fprintf('\n--- 外部源类型标签输入 (source = DSI_all) ---\n');
 
-% --- 从真值日志构建外部标签 ---
-ExternalLabelsRaw = build_labels_from_truth_log(M0Logs, Config);
+% --- 从 DSI 构建外部标签（主链路，保留完整 prior）---
+ExternalLabelsRaw = build_labels_from_dsi(DSI_all, Config);
 LabelTable = ingest_external_source_labels(ExternalLabelsRaw, Config);
 
 % --- 标签绑定到帧 ---
@@ -662,6 +667,40 @@ function EventList = build_event_list_from_context(SourceContext, Y_dBm_all, Y_l
         ev.source_uid = lbl.source_uid;
         ev.hold_reason = '';
         ev.upgrade_hint = 'none';
+
+        % --- prior / metadata 透传 ---
+        if isfield(lbl, 'location_prior') && isstruct(lbl.location_prior)
+            ev.location_prior = lbl.location_prior;
+        else
+            ev.location_prior = struct('type', 'none', 'value', []);
+        end
+        if isfield(lbl, 'power_prior') && isstruct(lbl.power_prior)
+            ev.power_prior = lbl.power_prior;
+        else
+            ev.power_prior = struct('type', 'none', 'value', []);
+        end
+        if isfield(lbl, 'metadata')
+            ev.metadata = lbl.metadata;
+        else
+            ev.metadata = struct();
+        end
+
+        % 便利字段
+        if isfield(ev.metadata, 'source_type_name') && ~isempty(ev.metadata.source_type_name)
+            ev.source_type_name = ev.metadata.source_type_name;
+        else
+            ev.source_type_name = ev.type_hat;
+        end
+        ev.location_prior_type = ev.location_prior.type;
+        ev.power_prior_type    = ev.power_prior.type;
+        if isfield(ev.metadata, 'instance_id')
+            ev.instance_id = ev.metadata.instance_id;
+        else
+            ev.instance_id = 0;
+        end
+        ev.is_calibration_source  = (lbl.label == LC.PERSISTENT_CAL || lbl.label == LC.BROADBAND_CAL);
+        ev.is_target_source       = (lbl.label == LC.TARGET);
+        ev.is_opportunistic_source = (lbl.label == LC.OPPORTUNISTIC);
 
         P_bar = mean(ev.obs_segment_dBm, 2);
         ev.power_level_est = mean(P_bar);

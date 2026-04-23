@@ -30,7 +30,12 @@ function M0State = init_runtime_state_m0_nonoverlap(Config, SourceTemplates)
     end
 
     % broadband_cal 跟踪
-    BC_count = Config.m0.source.broadband_cal.count;
+    BC = Config.m0.source.broadband_cal;
+    if isfield(BC, 'schedule_mode') && strcmp(BC.schedule_mode, 'manual')
+        BC_count = numel(BC.manual_schedule);
+    else
+        BC_count = BC.count;
+    end
     M0State.broadband_active  = false(1, BC_count);
     M0State.broadband_life    = zeros(1, BC_count);
     M0State.broadband_inst_id = zeros(1, BC_count);
