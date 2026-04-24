@@ -31,7 +31,7 @@ sim_override.debug.expose_true_source_state = true;
 sim_override.m0.source.broadband_cal.schedule_mode = 'manual';
 sim_override.m0.source.broadband_cal.manual_schedule = [
     struct('frame_range', [100, 150],  'pos_xy', [120, 150]);
-    struct('frame_range', [300, 350],  'pos_xy', [75, 228]);
+    struct('frame_range', [300, 350],  'pos_xy', [33, 231]);
 ];
 
 fp_cache_file = 'cache/SpatialFP_mwm_awgn.mat';
@@ -165,16 +165,28 @@ for pass = 1:2
     hold on;
     plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
 
+    % 标校源位置
+    cal_clr = [0.3 0.7 0.3];
+    bc_sched = sim_override.m0.source.broadband_cal.manual_schedule;
+    for ci = 1:numel(bc_sched)
+        cp = bc_sched(ci).pos_xy;
+        fr = bc_sched(ci).frame_range;
+        plot(cp(1), cp(2), 's', 'Color', cal_clr, 'MarkerSize', 10, ...
+            'MarkerFaceColor', cal_clr, 'LineWidth', 1.5);
+        text(cp(1)+2, cp(2)+2, sprintf('BC%d [%d-%d]', ci, fr(1), fr(2)), ...
+            'Color', cal_clr*0.7, 'FontSize', 7, 'FontWeight', 'bold');
+    end
+
     for k = 1:numel(LR)
         lr = LR(k);
         if isempty(lr.true_pos_xy) || all(lr.true_pos_xy == 0), continue; end
         switch lr.type_hat
             case 'target'
-                clr = [0.9 0.2 0.2];
+                clr = [0.9 0.2 0.2]; short_name = 'target';
             case 'opportunistic'
-                clr = [1.0 0.7 0.0];
+                clr = [1.0 0.7 0.0]; short_name = 'opp';
             otherwise
-                clr = [0.5 0.5 0.5];
+                clr = [0.5 0.5 0.5]; short_name = lr.type_hat;
         end
         plot(lr.true_pos_xy(1), lr.true_pos_xy(2), 'o', ...
             'Color', clr, 'MarkerSize', 8, 'MarkerFaceColor', clr);
@@ -183,6 +195,12 @@ for pass = 1:2
         plot([lr.true_pos_xy(1), lr.est_pos_xy(1)], ...
              [lr.true_pos_xy(2), lr.est_pos_xy(2)], ...
              '-', 'Color', min(1, clr*0.65 + 0.25), 'LineWidth', 1);
+        text(lr.true_pos_xy(1)+2, lr.true_pos_xy(2)+2, ...
+            sprintf('B%d %s', lr.band_id, short_name), ...
+            'Color', clr*0.75, 'FontSize', 8, 'FontWeight', 'bold');
+        text(lr.est_pos_xy(1)+2, lr.est_pos_xy(2)-4, ...
+            sprintf('B%d est', lr.band_id), ...
+            'Color', clr*0.55, 'FontSize', 8);
     end
 
     xlabel('X (m)'); ylabel('Y (m)');
@@ -190,15 +208,17 @@ for pass = 1:2
     axis equal; grid on;
     xlim(Config.area.x_range); ylim(Config.area.y_range);
 
-    leg_h = gobjects(5, 1);
+    leg_h = gobjects(7, 1);
     leg_h(1) = plot(NaN, NaN, 'r^', 'MarkerSize', 10, 'MarkerFaceColor', 'r');
-    leg_h(2) = plot(NaN, NaN, 'o', 'Color', [0.9 0.2 0.2], 'MarkerSize', 8, 'MarkerFaceColor', [0.9 0.2 0.2]);
-    leg_h(3) = plot(NaN, NaN, 'x', 'Color', [0.9 0.2 0.2]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
-    leg_h(4) = plot(NaN, NaN, 'o', 'Color', [1 0.7 0], 'MarkerSize', 8, 'MarkerFaceColor', [1 0.7 0]);
-    leg_h(5) = plot(NaN, NaN, 'x', 'Color', [1 0.7 0]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
+    leg_h(2) = plot(NaN, NaN, 's', 'Color', cal_clr, 'MarkerSize', 10, 'MarkerFaceColor', cal_clr);
+    leg_h(3) = plot(NaN, NaN, 'o', 'Color', [0.9 0.2 0.2], 'MarkerSize', 8, 'MarkerFaceColor', [0.9 0.2 0.2]);
+    leg_h(4) = plot(NaN, NaN, 'x', 'Color', [0.9 0.2 0.2]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
+    leg_h(5) = plot(NaN, NaN, 'o', 'Color', [1 0.7 0], 'MarkerSize', 8, 'MarkerFaceColor', [1 0.7 0]);
+    leg_h(6) = plot(NaN, NaN, 'x', 'Color', [1 0.7 0]*0.6, 'MarkerSize', 10, 'LineWidth', 2);
+    leg_h(7) = plot(NaN, NaN, '-', 'Color', [0.7 0.7 0.7], 'LineWidth', 1);
     hold off;
-    legend(leg_h, {'AP', 'target true', 'target est', 'opp true', 'opp est'}, ...
-        'Location', 'best');
+    legend(leg_h, {'AP', 'broadband cal', 'target true', 'target est', 'opp true', 'opp est', 'error line'}, ...
+        'Location', 'best', 'FontSize', 7);
 end
 sgtitle('M4 WKNN 定位结果 — 标校前 / 标校后');
 
