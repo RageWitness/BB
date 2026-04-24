@@ -209,10 +209,10 @@ end
 % [A5] 运行 M4, 验证 LocResults
 fprintf('\n--- 运行 M4 验证 LocResults ---\n');
 try
-    if ~exist('cache/SpatialFP_mwm_Nl.mat', 'file')
+    if ~exist('cache/SpatialFP_lognormal.mat', 'file')
         [SpatialFP, ~] = init_m25_single_source_fp(APs, Bands, GridValid, Config, SourceTemplates);
     else
-        S = load('cache/SpatialFP_mwm_Nl.mat');
+        S = load('cache/SpatialFP_lognormal.mat');
         SpatialFP = S.SpatialFP;
     end
     LocResults = run_m4_wknn_localization(EventList, SpatialFP, FrameStates, Config);

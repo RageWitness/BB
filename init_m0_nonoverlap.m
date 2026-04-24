@@ -81,13 +81,13 @@ function Config = default_config_m0()
     % 持续存在的标校源（always-on 保底）
     Config.m0.source.persistent_cal.position     = [150, 150];   % 固定位置
     Config.m0.source.persistent_cal.band_id      = 1;
-    Config.m0.source.persistent_cal.tx_power_dBm = 130;
+    Config.m0.source.persistent_cal.tx_power_dBm = 20;
 
     % 宽带标校源（covers all bands）
     Config.m0.source.broadband_cal.count            = 2;
     Config.m0.source.broadband_cal.life_mode        = 'geom';
     Config.m0.source.broadband_cal.life_param       = 0.005;
-    Config.m0.source.broadband_cal.tx_power_dBm     = 140;       % 每频带功率（标量则全频带相同）
+    Config.m0.source.broadband_cal.tx_power_dBm     = 20;       % 每频带功率（标量则全频带相同）
 
     % 机遇源先验类型概率（三选一，和为 1）
     Config.m0.source.opportunistic.location_prior_prob.exact    = 0.4;
@@ -99,7 +99,7 @@ function Config = default_config_m0()
     Config.m0.source.opportunistic.life_mode        = 'uniform';
     Config.m0.source.opportunistic.life_param       = 0.08;
     Config.m0.source.opportunistic.life_range       = [8, 25];
-    Config.m0.source.opportunistic.power_range_dBm  = [90, 90];
+    Config.m0.source.opportunistic.power_range_dBm  = [20, 20];
     Config.m0.source.opportunistic.gaussian.sigma_default = 5.0;
     Config.m0.source.opportunistic.region.building_pool   = 'all';
     Config.m0.source.opportunistic.region.max_resample    = 20;
@@ -111,13 +111,13 @@ function Config = default_config_m0()
     Config.m0.target.life_mode = 'geom';
     Config.m0.target.life_param = 0.08;
     Config.m0.target.life_range = [5, 30];
-    Config.m0.target.power_range_dBm = [10, 15; ...
-                                        10, 15; ...
-                                        80, 75; ...
-                                        80, 75];
+    Config.m0.target.power_range_dBm = [20, 20; ...
+                                        20, 20; ...
+                                        20, 20; ...
+                                        20, 20];
     Config.m0.target.position_mode = 'uniform';
 
-    % --- M3 配置（legacy，主链路已断开，新框架下不再使用） ---
+    % --- M3 配置（新框架下不再使用） ---
     Config.m3.grouping.enable = false;
     Config.m3.grouping.max_gap_frames = 2;
     Config.m3.relative_power.enable = true;

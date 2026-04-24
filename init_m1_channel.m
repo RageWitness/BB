@@ -49,18 +49,29 @@ function Config = fill_m1_defaults(Config)
         Config.m1.bands.name  = {'VHF-96M', 'VHF-89M', 'ISM-2.4G', 'S-2.6G'};
     end
 
-    % --- 信道模型选择（统一 MWM 模型）---
+    % --- 信道模型选择 ---
+    % 可选: 'lognormal' (对数正态阴影衰落) | 'mwm' (多墙模型)
     if ~isfield(Config.m1, 'channel') || ~isfield(Config.m1.channel, 'model_per_band')
-        Config.m1.channel.model_per_band = {'mwm', 'mwm', 'mwm', 'mwm'};
+        Config.m1.channel.model_per_band = {'lognormal', 'lognormal', 'lognormal', 'lognormal'};
     end
 
-    % --- 建筑布局（新统一模型使用）---
+    % --- 建筑布局（MWM 模型使用）---
     if ~isfield(Config.m1.channel, 'buildings') || isempty(Config.m1.channel.buildings)
         Config.m1.channel.buildings = get_default_buildings();
     end
 
-    % --- legacy 保留字段（不再使用，仅防止下游读取报错）---
-    % 旧 lognormal / COST231-WI 配置块已删除 (统一 MWM 模型不再需要)
+    % --- 对数正态阴影衰落模型参数 ---
+    if ~isfield(Config.m1.channel, 'lognormal')
+        Config.m1.channel.lognormal = struct();
+    end
+    ln = Config.m1.channel.lognormal;
+    if ~isfield(ln, 'd0'),    ln.d0    = 1;    end
+    if ~isfield(ln, 'n'),     ln.n     = 3;    end
+    if ~isfield(ln, 'sigma'), ln.sigma = 6;    end
+    if ~isfield(ln, 'PL0')
+        % 按各频带频率计算，留空让 compute_pathloss_lognormal 自动算
+    end
+    Config.m1.channel.lognormal = ln;
 
     % --- 慢变 ---
     if ~isfield(Config.m1.channel, 'enableSlowDrift')

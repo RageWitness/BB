@@ -12,7 +12,7 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
     if isfield(Config, 'm25') && isfield(Config.m25, 'ref_power_dBm')
         ref_power = Config.m25.ref_power_dBm;
     else
-        ref_power = 100 * ones(1, B);
+        ref_power = 20 * ones(1, B);
     end
 
     % 指纹模式
@@ -37,9 +37,20 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
 
     fprintf('[M2.5] 构建 SpatialFP: M=%d AP, G=%d 网格点, B=%d 频带\n', M, G, B);
 
-    % --- 几何缓存（与频率无关，一次构建供 B 频带复用）---
-    buildings = Config.m1.channel.buildings;
-    GeometryCache = precompute_geometry_cache(GridValid.xy, APs.pos_xy, buildings);
+    % --- 判断是否需要几何缓存（MWM 模型才需要）---
+    need_geometry = false;
+    for b = 1:B
+        if strcmp(Bands.model{b}, 'mwm')
+            need_geometry = true;
+            break;
+        end
+    end
+
+    GeometryCache = [];
+    if need_geometry
+        buildings = Config.m1.channel.buildings;
+        GeometryCache = precompute_geometry_cache(GridValid.xy, APs.pos_xy, buildings);
+    end
 
     N_mc = 50;
     if isfield(Config, 'm25') && isfield(Config.m25, 'n_mc_fp')
@@ -78,26 +89,60 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
         Std_dBm = zeros(M, G);
         Std_lin = zeros(M, G);
 
-        p_band  = get_channel_params(Bands.fc_Hz(b));
-        sigma_b = p_band.sigma;
         N_lin_b = N_lin_per_band(b);
-        noise_sigma_b = sqrt(N_lin_b);
 
-        for g = 1:G
-            PL_det = compute_pathloss_from_cache(g, Bands.fc_Hz(b), GeometryCache);
-            xi = sigma_b * randn(M, N_mc);
-            rss_dBm_samp = ref_power(b) - PL_det + xi;
-            rss_lin_samp = 10.^(rss_dBm_samp / 10);
+        if strcmp(Bands.model{b}, 'lognormal')
+            % --- 对数正态阴影衰落模型 ---
+            ln = Config.m1.channel.lognormal;
+            d0_ln    = ln.d0;
+            n_exp    = ln.n;
+            sigma_b  = ln.sigma;
+            if isfield(ln, 'PL0')
+                PL0_b = ln.PL0;
+            else
+                PL0_b = 20 * log10(Bands.fc_Hz(b) / 1e6) - 28;
+            end
 
-            % AWGN: Y = S + N, N ~ N(0, N_lin)
-            awgn_noise = noise_sigma_b * randn(M, N_mc);
-            rss_lin_samp = max(rss_lin_samp + awgn_noise, 1e-20);
+            for g = 1:G
+                dist_g = sqrt(sum((APs.pos_xy - GridValid.xy(g,:)).^2, 2));
+                dist_g = max(dist_g, d0_ln);
+                PL_det = PL0_b + 10 * n_exp * log10(dist_g / d0_ln);
 
-            rss_lin_mean = mean(rss_lin_samp, 2);
-            F_dBm(:, g)   = 10 * log10(max(rss_lin_mean, 1e-20));
-            F_lin(:, g)   = rss_lin_mean;
-            Std_dBm(:, g) = std(10 * log10(max(rss_lin_samp, 1e-20)), 0, 2);
-            Std_lin(:, g) = std(rss_lin_samp, 0, 2);
+                xi = sigma_b * randn(M, N_mc);
+                rss_dBm_samp = ref_power(b) - PL_det + xi;
+                rss_lin_samp = 10.^(rss_dBm_samp / 10);
+
+                % Add the mean receiver noise power floor in mW.
+                % N_lin_b is already receiver noise power.
+                rss_lin_samp = max(rss_lin_samp + N_lin_b, 1e-20);
+
+                rss_lin_mean = mean(rss_lin_samp, 2);
+                F_dBm(:, g)   = 10 * log10(max(rss_lin_mean, 1e-20));
+                F_lin(:, g)   = rss_lin_mean;
+                Std_dBm(:, g) = std(10 * log10(max(rss_lin_samp, 1e-20)), 0, 2);
+                Std_lin(:, g) = std(rss_lin_samp, 0, 2);
+            end
+        else
+            % --- MWM 模型 ---
+            p_band  = get_channel_params(Bands.fc_Hz(b));
+            sigma_b = p_band.sigma;
+
+            for g = 1:G
+                PL_det = compute_pathloss_from_cache(g, Bands.fc_Hz(b), GeometryCache);
+                xi = sigma_b * randn(M, N_mc);
+                rss_dBm_samp = ref_power(b) - PL_det + xi;
+                rss_lin_samp = 10.^(rss_dBm_samp / 10);
+
+                % Add the mean receiver noise power floor in mW.
+                % N_lin_b is already receiver noise power.
+                rss_lin_samp = max(rss_lin_samp + N_lin_b, 1e-20);
+
+                rss_lin_mean = mean(rss_lin_samp, 2);
+                F_dBm(:, g)   = 10 * log10(max(rss_lin_mean, 1e-20));
+                F_lin(:, g)   = rss_lin_mean;
+                Std_dBm(:, g) = std(10 * log10(max(rss_lin_samp, 1e-20)), 0, 2);
+                Std_lin(:, g) = std(rss_lin_samp, 0, 2);
+            end
         end
 
         band_fp.F_dBm   = F_dBm;
@@ -108,6 +153,7 @@ function SpatialFP = build_spatial_fp_single_source(APs, Bands, GridValid, Confi
         band_fp.bw_Hz   = Bands.bw_Hz(b);
         band_fp.model   = Bands.model{b};
         band_fp.noise_floor_dBm = N_dBm_per_band(b);
+        band_fp.noise_model = 'mean_power_floor';
         band_fp.reference_power_dBm_used = ref_power(b);
 
         % 预计算 RF_raw / RF_minmax / F_shape_l1 / centered_dBm

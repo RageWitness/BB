@@ -4,7 +4,7 @@ function [D_vec, extra] = compute_wknn_distance_fp_l2( ...
 %
 %   支持的 fingerprint_type:
 %     'rf_minmax'    - Min-Max 标准化到 [-1,1] (库 + 观测同步标准化)
-%     'rf_raw'       - 原始线性功率
+%     'rf_raw'       - 原始 dBm 功率
 %     'shape_l1'     - L1 归一化的 shape 向量
 %     'centered_dBm' - dBm 域去均值后的中心化向量
 %
@@ -24,7 +24,7 @@ function [D_vec, extra] = compute_wknn_distance_fp_l2( ...
             else
                 F_lib = SpatialFP_band.F_lin;
             end
-            F_obs = F_obs_lin(:);
+            F_obs = F_obs_dBm(:);
 
         case 'shape_l1'
             F_lib = SpatialFP_band.F_shape_l1;

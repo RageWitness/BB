@@ -76,8 +76,8 @@ fprintf('[Demo] EventList: %d 个事件\n', numel(EventList));
 
 % --- 构建指纹库 ---
 fprintf('[Demo] 构建指纹库 ...\n');
-if exist('cache/SpatialFP_mwm_Nl.mat', 'file')
-    S = load('cache/SpatialFP_mwm_Nl.mat');
+if exist('cache/SpatialFP_lognormal.mat', 'file')
+    S = load('cache/SpatialFP_lognormal.mat');
     SpatialFP = S.SpatialFP;
     fprintf('[Demo] 从缓存加载 SpatialFP\n');
 else

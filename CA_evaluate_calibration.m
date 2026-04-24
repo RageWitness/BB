@@ -34,7 +34,7 @@ sim_override.m0.source.broadband_cal.manual_schedule = [
     struct('frame_range', [300, 350],  'pos_xy', [33, 231]);
 ];
 
-fp_cache_file = 'cache/SpatialFP_mwm_awgn.mat';
+fp_cache_file = 'cache/SpatialFP_lognormal.mat';
 
 [SourceTemplates, M0State, M0Logs, GridValid, Config, APs] = init_m0_nonoverlap(sim_override);
 [Bands, ChannelState, Config] = init_m1_channel(Config, APs);

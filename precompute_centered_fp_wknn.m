@@ -27,7 +27,7 @@ function SpatialFP_band = precompute_centered_fp_wknn(SpatialFP_band, fp_mode)
     %  新框架主模式：Min-Max 标准化到 [-1, 1]
     % ============================================
     if strcmp(fp_mode, 'rf_minmax') || strcmp(fp_mode, 'both')
-        SpatialFP_band.RF_raw = F_lin;
+        SpatialFP_band.RF_raw = SpatialFP_band.F_dBm;
 
         z_min = min(F_lin, [], 1);   % 1 x G
         z_max = max(F_lin, [], 1);   % 1 x G
