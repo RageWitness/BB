@@ -66,8 +66,8 @@ function Config = fill_m1_defaults(Config)
     end
     ln = Config.m1.channel.lognormal;
     if ~isfield(ln, 'd0'),    ln.d0    = 1;    end
-    if ~isfield(ln, 'n'),     ln.n     = 3;    end
-    if ~isfield(ln, 'sigma'), ln.sigma = 6;    end
+    if ~isfield(ln, 'n'),     ln.n     = 2.5;    end
+    if ~isfield(ln, 'sigma'), ln.sigma = 4;    end
     if ~isfield(ln, 'PL0')
         % 按各频带频率计算，留空让 compute_pathloss_lognormal 自动算
     end
