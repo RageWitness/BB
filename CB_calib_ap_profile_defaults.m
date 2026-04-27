@@ -1,0 +1,55 @@
+function cfg = CB_calib_ap_profile_defaults(Config)
+% CB_CALIB_AP_PROFILE_DEFAULTS  Defaults for AP-profile RSS calibration.
+
+    if nargin < 1 || isempty(Config)
+        Config = struct();
+    end
+
+    cfg = struct();
+    if isfield(Config, 'calib_ap_profile') && isstruct(Config.calib_ap_profile)
+        cfg = Config.calib_ap_profile;
+    end
+
+    cfg = set_default(cfg, 'enable', true);
+    cfg = set_default(cfg, 'power_known_only', true);
+    cfg = set_default(cfg, 'kernel', 'se_ard');
+    cfg = set_default(cfg, 'ap_pos_xy', []);
+
+    cfg = set_default(cfg, 'sigma_f_dB', 8);
+    cfg = set_default(cfg, 'ell_x_m', 35);
+    cfg = set_default(cfg, 'ell_y_m', 35);
+    cfg = set_default(cfg, 'sigma0_dB', 8);
+    cfg = set_default(cfg, 'sigma_meas_dB', 1.5);
+    cfg = set_default(cfg, 'gamma_region_var', 1.0);
+    cfg = set_default(cfg, 'gamma_gaussian_var', 0.0);
+
+    cfg = set_default(cfg, 'trajectory_quad_n', 25);
+    cfg = set_default(cfg, 'rect_quad_n', 9);
+    cfg = set_default(cfg, 'gaussian_quad_n', 9);
+
+    cfg = set_default(cfg, 'backend', 'scalable_subset_gp');
+    cfg = set_default(cfg, 'max_train_points_exact_gp', 350);
+    cfg = set_default(cfg, 'max_offline_train_points', 300);
+    cfg = set_default(cfg, 'prediction_block_size', 1500);
+    cfg = set_default(cfg, 'jitter_rel', 1e-6);
+    cfg = set_default(cfg, 'jitter_abs', 1e-8);
+
+    cfg = set_default(cfg, 'validation_fraction', 0.20);
+    cfg = set_default(cfg, 'loc_rmse_threshold_m', 13);
+    cfg = set_default(cfg, 'enable_ga_feedback', true);
+    cfg = set_default(cfg, 'ga_population', 10);
+    cfg = set_default(cfg, 'ga_generations', 5);
+    cfg = set_default(cfg, 'ga_mutation_rate', 0.25);
+    cfg = set_default(cfg, 'ga_crossover_rate', 0.65);
+    cfg = set_default(cfg, 'ga_elite_count', 2);
+
+    cfg = set_default(cfg, 'reject_power_none', true);
+    cfg = set_default(cfg, 'verbose', true);
+end
+
+
+function s = set_default(s, name, value)
+    if ~isfield(s, name) || isempty(s.(name))
+        s.(name) = value;
+    end
+end
