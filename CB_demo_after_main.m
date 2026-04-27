@@ -24,6 +24,10 @@ cb_source_filter = 'opportunistic';     % opportunistic | calibration | all_powe
 cb_train_fraction = 0.80;
 cb_min_validation_events = 3;
 cb_rng_seed = 20260426;
+cb_local_probe_enable = true;
+cb_local_probe_radius_m = 60;
+cb_local_probe_max_per_band = 30;
+cb_local_probe_tx_power_dBm = 20;
 
 % Keep the first run reasonably light. Increase these if you want a stronger
 % but slower global AP-profile update.
@@ -41,7 +45,11 @@ Config_cb.calib_ap_profile.sigma0_dB = 8;
 Config_cb.calib_ap_profile.sigma_meas_dB = 1.5;
 Config_cb.calib_ap_profile.gamma_region_var = 1.0;
 Config_cb.calib_ap_profile.loc_rmse_threshold_m = 13;
-Config_cb.calib_ap_profile.enable_ga_feedback = true;
+Config_cb.calib_ap_profile.enable_fast_search = true;
+Config_cb.calib_ap_profile.fast_ell_grid_m = [20, 40, 80, 120];
+Config_cb.calib_ap_profile.fast_trust_ratio_grid = [2, 4, 8, 12];
+Config_cb.calib_ap_profile.fast_refine_enable = true;
+Config_cb.calib_ap_profile.enable_ga_feedback = false;
 Config_cb.calib_ap_profile.ga_population = 8;
 Config_cb.calib_ap_profile.ga_generations = 4;
 Config_cb.calib_ap_profile.verbose = true;
@@ -77,7 +85,16 @@ fprintf('[CB-demo] train CB events=%d, validation EventList=%d\n', ...
 [APProfile0, SpatialFP_init] = CB_build_ap_profiles_from_offline_library( ...
     SpatialFP_working, SpatialFP_working.grid_xy, Config_cb);
 
-if isempty(ValidationEventList)
+CBSearchResult = struct('status', 'not_run');
+Config_cb_final = Config_cb;
+cfg_cb_now = CB_calib_ap_profile_defaults(Config_cb);
+if ~isempty(ValidationEventList) && cfg_cb_now.enable_fast_search
+    [Config_cb_final, CBSearchResult] = CB_search_hyperparams_fast( ...
+        SpatialFP_init, CBEvents_train, ValidationEventList, FrameStates, Config_cb);
+    [APProfile_pending, SpatialFP_pending, CBDiagnostics] = ...
+        CB_update_ap_profiles_with_calibration_sources( ...
+            APProfile0, SpatialFP_init, CBEvents_train, Config_cb_final);
+elseif isempty(ValidationEventList) || ~cfg_cb_now.enable_ga_feedback
     [APProfile_pending, SpatialFP_pending, CBDiagnostics] = ...
         CB_update_ap_profiles_with_calibration_sources( ...
             APProfile0, SpatialFP_init, CBEvents_train, Config_cb);
@@ -86,9 +103,20 @@ else
         CB_run_update_with_loc_feedback( ...
             APProfile0, SpatialFP_init, CBEvents_train, ValidationEventList, FrameStates, Config_cb);
 end
+CBDiagnostics.fast_search = CBSearchResult;
+Config_cb = Config_cb_final;
 
 fprintf('\n--- CB result ---\n');
 fprintf('  status: %s\n', CBDiagnostics.status);
+if isfield(CBDiagnostics, 'fast_search') && isfield(CBDiagnostics.fast_search, 'status')
+    fprintf('  fast search: %s\n', CBDiagnostics.fast_search.status);
+    if strcmp(CBDiagnostics.fast_search.status, 'ok')
+        fprintf('  best ell=%.2f m, trust_ratio=%.2f, validation RMSE=%.3f m\n', ...
+            CBDiagnostics.fast_search.best_ell_m, ...
+            CBDiagnostics.fast_search.best_trust_ratio, ...
+            CBDiagnostics.fast_search.best_rmse_m);
+    end
+end
 if isfield(CBDiagnostics, 'feedback') && isfield(CBDiagnostics.feedback, 'enabled')
     fprintf('  feedback enabled: %d\n', CBDiagnostics.feedback.enabled);
     if isfield(CBDiagnostics.feedback, 'initial_loc_rmse_m')
@@ -120,7 +148,32 @@ plot_cb_event_map_by_band(CBEvents_train, SpatialFP_original, APs, GridValid);
 plot_cb_per_ap_delta(CBDiagnostics, SpatialFP_original);
 plot_cb_loc_compare(LocResults_before_CB, LocResults_after_CB, GridValid, APs);
 plot_cb_target_loc_with_opp( ...
-    LocResults_target_before_CB, LocResults_target_after_CB, OppPriorEvents_all, GridValid, APs);
+    LocResults_target_before_CB, LocResults_target_after_CB, CBEvents_train, GridValid, APs);
+plot_cb_target_after_by_band(LocResults_target_after_CB, CBEvents_train, SpatialFP_pending, GridValid, APs);
+
+if cb_local_probe_enable
+    if exist('Bands', 'var') && exist('ChannelState', 'var')
+        [CBLocalProbeEvents, CBLocalProbeFrameStates] = build_cb_local_probe_events( ...
+            CBEvents_train, GridValid, APs, Bands, ChannelState, Config_cb, ...
+            cb_local_probe_radius_m, cb_local_probe_max_per_band, cb_local_probe_tx_power_dBm);
+
+        fprintf('\n--- CB local probe target before/after around used calibration sources ---\n');
+        fprintf('  local probe events: %d, radius=%.1f m\n', ...
+            numel(CBLocalProbeEvents), cb_local_probe_radius_m);
+
+        LocResults_local_probe_before_CB = run_m4_wknn_localization( ...
+            CBLocalProbeEvents, SpatialFP_original, CBLocalProbeFrameStates, Config_cb);
+        LocResults_local_probe_after_CB = run_m4_wknn_localization( ...
+            CBLocalProbeEvents, SpatialFP_pending, CBLocalProbeFrameStates, Config_cb);
+
+        print_loc_compare(LocResults_local_probe_before_CB, LocResults_local_probe_after_CB);
+        plot_cb_local_probe_compare_by_band( ...
+            LocResults_local_probe_before_CB, LocResults_local_probe_after_CB, ...
+            CBEvents_train, SpatialFP_pending, GridValid, APs, cb_local_probe_radius_m);
+    else
+        fprintf('[CB-demo] skip local probe: Bands or ChannelState missing in workspace\n');
+    end
+end
 
 fprintf('\n[CB-demo] Done. Pending library is in variable SpatialFP_pending.\n');
 fprintf('[CB-demo] Original library remains in SpatialFP_original / SpatialFP.\n');
@@ -311,6 +364,374 @@ function plot_cb_target_loc_with_opp(before, after, opp_events, GridValid, APs)
 end
 
 
+function plot_cb_target_after_by_band(LocResults_after, used_events, SpatialFP, GridValid, APs)
+    B = SpatialFP.B;
+    n_col = min(B, 4);
+    n_row = ceil(B / n_col);
+
+    figure('Name', 'CB target after calibration by band', ...
+        'Position', [40 70 1600 780]);
+
+    for b = 1:B
+        subplot(n_row, n_col, b);
+        plot(GridValid.xy(:,1), GridValid.xy(:,2), '.', ...
+            'Color', [0.93 0.93 0.93], 'MarkerSize', 2);
+        hold on;
+
+        plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', ...
+            'MarkerSize', 9, 'MarkerFaceColor', 'r');
+
+        plot_band_target_results(LocResults_after, b);
+        overlay_opportunistic_priors(filter_events_by_band(used_events, b), true);
+
+        axis equal tight;
+        grid on;
+        title(sprintf('Band %d after CB', b));
+        xlabel('X (m)');
+        ylabel('Y (m)');
+
+        n_target = count_loc_band(LocResults_after, b);
+        n_used = count_event_band(used_events, b);
+        text(0.02, 0.98, sprintf('target=%d, used opp=%d', n_target, n_used), ...
+            'Units', 'normalized', 'VerticalAlignment', 'top', ...
+            'Color', [0.1 0.1 0.1], 'FontSize', 8, ...
+            'BackgroundColor', [1 1 1 0.65]);
+    end
+
+    sgtitle('CB 标校后：各单频带 target 定位结果与实际使用的机遇标校源');
+end
+
+
+function plot_band_target_results(LocResults, band_id)
+    if isempty(LocResults), return; end
+    for k = 1:numel(LocResults)
+        lr = LocResults(k);
+        if lr.band_id ~= band_id
+            continue;
+        end
+        if isempty(lr.true_pos_xy) || any(~isfinite(lr.true_pos_xy)) || isempty(lr.est_pos_xy)
+            continue;
+        end
+        plot(lr.true_pos_xy(1), lr.true_pos_xy(2), 'o', ...
+            'Color', [0.9 0.15 0.15], 'MarkerFaceColor', [0.9 0.15 0.15], ...
+            'MarkerSize', 5);
+        plot(lr.est_pos_xy(1), lr.est_pos_xy(2), 'x', ...
+            'Color', [0.55 0 0], 'MarkerSize', 7, 'LineWidth', 1.3);
+        plot([lr.true_pos_xy(1), lr.est_pos_xy(1)], ...
+             [lr.true_pos_xy(2), lr.est_pos_xy(2)], ...
+            '-', 'Color', [0.85 0.45 0.45], 'LineWidth', 0.8);
+        text(lr.true_pos_xy(1) + 2, lr.true_pos_xy(2) + 2, ...
+            sprintf('T%d', k), 'Color', [0.8 0 0], 'FontSize', 7);
+    end
+end
+
+
+function out = filter_events_by_band(events, band_id)
+    out = [];
+    if isempty(events), return; end
+    keep = [events.band_id] == band_id;
+    out = events(keep);
+end
+
+
+function n = count_loc_band(LocResults, band_id)
+    if isempty(LocResults)
+        n = 0;
+    else
+        n = sum([LocResults.band_id] == band_id);
+    end
+end
+
+
+function n = count_event_band(events, band_id)
+    if isempty(events)
+        n = 0;
+    else
+        n = sum([events.band_id] == band_id);
+    end
+end
+
+
+function [ProbeEvents, ProbeFrameStates] = build_cb_local_probe_events( ...
+    used_events, GridValid, APs, Bands, ChannelState, Config, radius_m, max_per_band, tx_power_dBm)
+
+    LC = source_label_constants();
+    B = Config.m0.num_bands;
+    M = APs.num;
+    ProbeEvents = [];
+    probe_pos_by_event = [];
+    probe_band_by_event = [];
+    eid = 0;
+
+    for b = 1:B
+        used_b = filter_events_by_band(used_events, b);
+        if isempty(used_b)
+            continue;
+        end
+
+        mask = false(GridValid.Nvalid, 1);
+        for i = 1:numel(used_b)
+            xy0 = representative_prior_xy(used_b(i).location_prior);
+            if any(~isfinite(xy0))
+                continue;
+            end
+            d = sqrt(sum((GridValid.xy - xy0).^2, 2));
+            mask = mask | (d <= radius_m);
+        end
+
+        idx = find(mask);
+        if isempty(idx)
+            continue;
+        end
+        if numel(idx) > max_per_band
+            pick = round(linspace(1, numel(idx), max_per_band));
+            idx = idx(pick);
+        end
+
+        for ii = 1:numel(idx)
+            pos_xy = GridValid.xy(idx(ii), :);
+            active_state = make_probe_active_state(b, pos_xy, tx_power_dBm);
+            BandObs = generate_band_obs_m1(active_state, APs, Bands, ChannelState, Config, b);
+
+            eid = eid + 1;
+            ev = struct();
+            ev.event_id = eid;
+            ev.band_id = b;
+            ev.t_start = eid;
+            ev.t_end = eid;
+            ev.time_range = [eid, eid];
+            ev.duration = 1;
+            ev.obs_segment_dBm = BandObs.Y_dBm(:);
+            ev.obs_segment_lin = BandObs.Y_lin(:);
+            ev.label = LC.TARGET;
+            ev.type_hat = 'target';
+            ev.route_action = 'localize_only';
+            ev.linked_template_key = sprintf('cb_local_probe_b%d_%03d', b, ii);
+            ev.source_uid = ev.linked_template_key;
+            ev.hold_reason = '';
+            ev.upgrade_hint = 'none';
+            ev.location_prior = struct('type', 'none', 'value', []);
+            ev.power_prior = struct('type', 'exact', 'value', tx_power_dBm);
+            ev.metadata = struct('source_type_name', 'target', 'instance_id', eid, ...
+                'is_cb_local_probe', true, 'true_pos_xy', pos_xy);
+            ev.source_type_name = 'target';
+            ev.location_prior_type = 'none';
+            ev.power_prior_type = 'exact';
+            ev.instance_id = eid;
+            ev.is_calibration_source = false;
+            ev.is_target_source = true;
+            ev.is_opportunistic_source = false;
+            ev.power_level_est = mean(BandObs.Y_dBm);
+            ev.power_stability_est = 0;
+            ev.score_trusted = 0;
+            ev.score_prior_pos = 0;
+            ev.score_prior_time = 0;
+            ev.score_target = 1;
+            ev.band_coverage_vec = zeros(1, B);
+            ev.band_coverage_vec(b) = 1;
+            ev.n_valid_ap = M;
+
+            if isempty(ProbeEvents)
+                ProbeEvents = ev;
+            else
+                ProbeEvents(end+1) = ev; %#ok<AGROW>
+            end
+            probe_pos_by_event(eid, :) = pos_xy; %#ok<AGROW>
+            probe_band_by_event(eid, 1) = b; %#ok<AGROW>
+        end
+    end
+
+    ProbeFrameStates = build_probe_frame_states(probe_pos_by_event, probe_band_by_event, B, tx_power_dBm);
+end
+
+
+function active_state = make_probe_active_state(b, pos_xy, tx_power_dBm)
+    active_state = struct();
+    active_state.has_source = true;
+    active_state.source_type = 'target';
+    active_state.source_subtype = 'target';
+    active_state.band_id = b;
+    active_state.band_list = b;
+    active_state.true_position = pos_xy;
+    active_state.true_pos_xy = pos_xy;
+    active_state.true_tx_power = tx_power_dBm;
+    active_state.tx_power_dBm = tx_power_dBm;
+    active_state.tx_power_by_band = [];
+    active_state.template_key = sprintf('cb_local_probe_b%d', b);
+    active_state.instance_id = 0;
+    active_state.location_prior = struct('type', 'none', 'value', []);
+    active_state.power_prior = struct('type', 'exact', 'value', tx_power_dBm);
+    active_state.timestamp = 1;
+    active_state.is_calibrator = false;
+    active_state.is_localization_target = true;
+end
+
+
+function FrameStates = build_probe_frame_states(pos_by_event, band_by_event, B, tx_power_dBm)
+    T = size(pos_by_event, 1);
+    FrameStates = cell(1, T);
+    for t = 1:T
+        fs = struct();
+        fs.frame_id = t;
+        fs.time_sec = t;
+        for b = 1:B
+            fs.active_per_band(b) = empty_probe_event(b, t);
+        end
+        b0 = band_by_event(t);
+        fs.active_per_band(b0).has_source = true;
+        fs.active_per_band(b0).source_type = 'target';
+        fs.active_per_band(b0).source_subtype = 'target';
+        fs.active_per_band(b0).band_id = b0;
+        fs.active_per_band(b0).band_list = b0;
+        fs.active_per_band(b0).true_position = pos_by_event(t, :);
+        fs.active_per_band(b0).true_pos_xy = pos_by_event(t, :);
+        fs.active_per_band(b0).true_tx_power = tx_power_dBm;
+        fs.active_per_band(b0).tx_power_dBm = tx_power_dBm;
+        fs.active_per_band(b0).template_key = sprintf('cb_local_probe_b%d_%03d', b0, t);
+        fs.active_per_band(b0).instance_id = t;
+        fs.active_per_band(b0).is_localization_target = true;
+        fs.active_source_count_unique = 1;
+        fs.active_band_count = 1;
+        FrameStates{t} = fs;
+    end
+end
+
+
+function apb = empty_probe_event(b, t)
+    apb = struct();
+    apb.has_source = false;
+    apb.source_type = '';
+    apb.source_subtype = '';
+    apb.band_id = b;
+    apb.band_list = b;
+    apb.true_position = [0 0];
+    apb.true_pos_xy = [0 0];
+    apb.true_tx_power = 0;
+    apb.tx_power_dBm = 0;
+    apb.tx_power_by_band = [];
+    apb.location_prior = struct('type', 'none', 'value', []);
+    apb.power_prior = struct('type', 'none', 'value', []);
+    apb.timestamp = t;
+    apb.template_key = '';
+    apb.instance_id = 0;
+    apb.is_calibrator = false;
+    apb.is_localization_target = false;
+end
+
+
+function xy = representative_prior_xy(lp)
+    switch lp.type
+        case 'exact'
+            xy = prior_exact_xy(lp);
+        case 'region'
+            bbox = prior_bbox(lp);
+            xy = [0.5 * (bbox(1) + bbox(2)), 0.5 * (bbox(3) + bbox(4))];
+        case 'gaussian'
+            [mu, ~] = prior_gaussian(lp);
+            xy = mu;
+        case 'trajectory'
+            path = prior_trajectory_path(lp);
+            if isempty(path)
+                xy = [NaN NaN];
+            else
+                xy = path(round(size(path, 1) / 2), :);
+            end
+        otherwise
+            xy = [NaN NaN];
+    end
+end
+
+
+function plot_cb_local_probe_compare_by_band(before, after, used_events, SpatialFP, GridValid, APs, radius_m)
+    B = SpatialFP.B;
+    n_col = min(B, 4);
+    n_row = ceil(B / n_col);
+
+    figure('Name', 'CB local probe before after by band', ...
+        'Position', [40 80 1650 800]);
+
+    for b = 1:B
+        subplot(n_row, n_col, b);
+        plot(GridValid.xy(:,1), GridValid.xy(:,2), '.', ...
+            'Color', [0.94 0.94 0.94], 'MarkerSize', 2);
+        hold on;
+        plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', ...
+            'MarkerSize', 9, 'MarkerFaceColor', 'r');
+
+        plot_probe_result_pair(before, after, b);
+        used_b = filter_events_by_band(used_events, b);
+        overlay_probe_radius(used_b, radius_m);
+        overlay_opportunistic_priors(used_b, true);
+
+        axis equal tight;
+        grid on;
+        title(sprintf('Band %d local probes around used opp', b));
+        xlabel('X (m)');
+        ylabel('Y (m)');
+        text(0.02, 0.98, sprintf('probe=%d, used opp=%d', ...
+            count_loc_band(after, b), count_event_band(used_events, b)), ...
+            'Units', 'normalized', 'VerticalAlignment', 'top', ...
+            'Color', [0.1 0.1 0.1], 'FontSize', 8, ...
+            'BackgroundColor', [1 1 1 0.65]);
+    end
+
+    sgtitle('60m local synthetic target probes: original library vs CB pending library');
+end
+
+
+function plot_probe_result_pair(before, after, band_id)
+    if isempty(after), return; end
+    for k = 1:numel(after)
+        lr_a = after(k);
+        if lr_a.band_id ~= band_id
+            continue;
+        end
+        true_xy = lr_a.true_pos_xy;
+        if isempty(true_xy) || any(~isfinite(true_xy))
+            continue;
+        end
+        plot(true_xy(1), true_xy(2), 'o', ...
+            'Color', [0.1 0.1 0.1], 'MarkerFaceColor', [0.1 0.1 0.1], ...
+            'MarkerSize', 4);
+
+        before_idx = find_matching_loc_result(before, lr_a.event_id);
+        if before_idx > 0
+            lr_b = before(before_idx);
+            plot(lr_b.est_pos_xy(1), lr_b.est_pos_xy(2), 'x', ...
+                'Color', [0.75 0.2 0.2], 'MarkerSize', 7, 'LineWidth', 1.2);
+            plot([true_xy(1), lr_b.est_pos_xy(1)], [true_xy(2), lr_b.est_pos_xy(2)], ...
+                '-', 'Color', [0.9 0.55 0.55], 'LineWidth', 0.7);
+        end
+
+        plot(lr_a.est_pos_xy(1), lr_a.est_pos_xy(2), '+', ...
+            'Color', [0.05 0.45 0.9], 'MarkerSize', 7, 'LineWidth', 1.3);
+        plot([true_xy(1), lr_a.est_pos_xy(1)], [true_xy(2), lr_a.est_pos_xy(2)], ...
+            '-', 'Color', [0.45 0.7 0.95], 'LineWidth', 0.7);
+    end
+end
+
+
+function idx = find_matching_loc_result(results, event_id)
+    idx = 0;
+    if isempty(results), return; end
+    ids = [results.event_id];
+    hit = find(ids == event_id, 1);
+    if ~isempty(hit), idx = hit; end
+end
+
+
+function overlay_probe_radius(events, radius_m)
+    if isempty(events), return; end
+    th = linspace(0, 2*pi, 120);
+    for i = 1:numel(events)
+        xy = representative_prior_xy(events(i).location_prior);
+        if any(~isfinite(xy)), continue; end
+        plot(xy(1) + radius_m*cos(th), xy(2) + radius_m*sin(th), ...
+            '--', 'Color', [0.25 0.55 0.25], 'LineWidth', 0.8);
+    end
+end
+
+
 function plot_target_loc_panel_with_opp(LocResults, opp_events, GridValid, APs, ttl)
     plot(GridValid.xy(:,1), GridValid.xy(:,2), '.', 'Color', [0.93 0.93 0.93], 'MarkerSize', 2);
     hold on;
@@ -377,7 +798,7 @@ function plot_target_loc_panel_with_opp(LocResults, opp_events, GridValid, APs, 
         leg_h(end+1) = h_opp.trajectory; %#ok<AGROW>
         leg_s{end+1} = 'opp trajectory'; %#ok<AGROW>
     end
-    legend(leg_h, leg_s, 'Location', 'best');
+    add_safe_legend(leg_h, leg_s);
 end
 
 
@@ -402,9 +823,12 @@ function h = overlay_opportunistic_priors(events, show_text)
 
             case 'region'
                 bbox = prior_bbox(lp);
-                hh = rectangle('Position', [bbox(1), bbox(3), bbox(2)-bbox(1), bbox(4)-bbox(3)], ...
+                rectangle('Position', [bbox(1), bbox(3), bbox(2)-bbox(1), bbox(4)-bbox(3)], ...
                     'EdgeColor', [0 0.55 0], 'LineWidth', 1.2, 'LineStyle', '-');
-                if isempty(h.region), h.region = hh; end
+                if isempty(h.region)
+                    h.region = plot(NaN, NaN, '-', 'Color', [0 0.55 0], ...
+                        'LineWidth', 1.2, 'LineStyle', '-');
+                end
                 label_xy = [bbox(1), bbox(4)];
                 label_txt = sprintf('B%d opp region', b);
 
@@ -432,6 +856,17 @@ function h = overlay_opportunistic_priors(events, show_text)
             text(label_xy(1) + 2, label_xy(2) + 2, label_txt, ...
                 'Color', [0.15 0.15 0.15], 'FontSize', 7);
         end
+    end
+end
+
+
+function add_safe_legend(handles_in, labels_in)
+    keep = false(1, numel(handles_in));
+    for i = 1:numel(handles_in)
+        keep(i) = ~isempty(handles_in(i)) && isgraphics(handles_in(i));
+    end
+    if any(keep)
+        legend(handles_in(keep), labels_in(keep), 'Location', 'best');
     end
 end
 

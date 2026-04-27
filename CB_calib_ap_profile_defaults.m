@@ -36,7 +36,13 @@ function cfg = CB_calib_ap_profile_defaults(Config)
 
     cfg = set_default(cfg, 'validation_fraction', 0.20);
     cfg = set_default(cfg, 'loc_rmse_threshold_m', 13);
-    cfg = set_default(cfg, 'enable_ga_feedback', true);
+    cfg = set_default(cfg, 'enable_fast_search', true);
+    cfg = set_default(cfg, 'fast_search_backend', 'kernel_smoothing_fast');
+    cfg = set_default(cfg, 'fast_ell_grid_m', [20, 40, 80, 120]);
+    cfg = set_default(cfg, 'fast_trust_ratio_grid', [2, 4, 8, 12]);
+    cfg = set_default(cfg, 'fast_refine_enable', true);
+    cfg = set_default(cfg, 'fast_refine_scale', [0.75, 1.0, 1.25]);
+    cfg = set_default(cfg, 'enable_ga_feedback', false);
     cfg = set_default(cfg, 'ga_population', 10);
     cfg = set_default(cfg, 'ga_generations', 5);
     cfg = set_default(cfg, 'ga_mutation_rate', 0.25);
