@@ -25,6 +25,7 @@ cd_local_probe_enable = true;
 cd_local_probe_radius_m = 80;
 cd_local_probe_max_per_band = 30;
 cd_local_probe_tx_power_dBm = 20;
+cd_truth_fp_path = fullfile(pwd, 'cache', 'SpatialFP_lognormal_new.mat');
 
 Config_cd = Config;
 Config_cd.cd.enable = true;
@@ -90,6 +91,14 @@ print_loc_compare(LocResults_target_before_CD, LocResults_target_after_CD);
 
 %% Plots
 plot_cd_delta_maps(SpatialFP_original, SpatialFP_CD, CDEvents_train, APs, GridValid);
+SpatialFP_truth_CD = load_cd_truth_spatialfp(cd_truth_fp_path);
+if ~isempty(SpatialFP_truth_CD)
+    plot_cd_truth_error_in_used_regions( ...
+        SpatialFP_original, SpatialFP_CD, SpatialFP_truth_CD, ...
+        CDEvents_train, APs, GridValid, cd_local_probe_radius_m);
+else
+    fprintf('[CD-demo] skip truth error map: cannot load %s\n', cd_truth_fp_path);
+end
 plot_cd_event_map_by_band(CDEvents_train, SpatialFP_original, APs, GridValid);
 plot_cd_target_loc_compare( ...
     LocResults_target_before_CD, LocResults_target_after_CD, CDEvents_train, GridValid, APs);
@@ -245,6 +254,29 @@ function v = rmse_or_nan(x)
 end
 
 
+function SpatialFP_truth = load_cd_truth_spatialfp(mat_path)
+    SpatialFP_truth = [];
+    if ~exist(mat_path, 'file')
+        return;
+    end
+
+    S = load(mat_path);
+    if isfield(S, 'SpatialFP')
+        SpatialFP_truth = S.SpatialFP;
+        return;
+    end
+
+    names = fieldnames(S);
+    for i = 1:numel(names)
+        v = S.(names{i});
+        if isstruct(v) && isfield(v, 'band')
+            SpatialFP_truth = v;
+            return;
+        end
+    end
+end
+
+
 function plot_cd_delta_maps(SpatialFP_old, SpatialFP_new, events, APs, GridValid)
     B = SpatialFP_old.B;
     n_col = min(B, 4);
@@ -281,6 +313,163 @@ function plot_cd_delta_maps(SpatialFP_old, SpatialFP_new, events, APs, GridValid
         ylabel('Y (m)');
     end
     sgtitle('CD calibration delta maps');
+end
+
+
+function plot_cd_truth_error_in_used_regions(SpatialFP_old, SpatialFP_new, SpatialFP_truth, events, APs, GridValid, radius_m)
+    B = min([SpatialFP_old.B, SpatialFP_new.B, SpatialFP_truth.B]);
+    n_col = B;
+    n_row = 2;
+    vals = [];
+    stat = struct([]);
+
+    for b = 1:B
+        F_old = align_band_matrix(get_band_dbm(SpatialFP_old.band(b)), GridValid);
+        F_new = align_band_matrix(get_band_dbm(SpatialFP_new.band(b)), GridValid);
+        F_true = align_band_matrix(get_band_dbm(SpatialFP_truth.band(b)), GridValid);
+        mask = build_cd_used_region_mask(GridValid.xy, filter_events_by_band(events, b), radius_m);
+
+        err_old = rms_ap_error(F_old, F_true);
+        err_new = rms_ap_error(F_new, F_true);
+        err_old(~mask) = NaN;
+        err_new(~mask) = NaN;
+
+        vals = [vals; err_old(isfinite(err_old)); err_new(isfinite(err_new))]; %#ok<AGROW>
+        stat(b).mask = mask; %#ok<AGROW>
+        stat(b).err_old = err_old;
+        stat(b).err_new = err_new;
+        stat(b).mean_old = mean_or_nan(err_old(isfinite(err_old)));
+        stat(b).mean_new = mean_or_nan(err_new(isfinite(err_new)));
+        stat(b).delta_mean = stat(b).mean_new - stat(b).mean_old;
+        stat(b).improve_count = sum(isfinite(err_old) & isfinite(err_new) & err_new < err_old);
+        stat(b).n_mask = nnz(mask);
+    end
+
+    if isempty(vals)
+        clim = [0 1];
+    else
+        hi = percentile_local(vals, 95);
+        if ~isfinite(hi) || hi <= 0, hi = max(vals); end
+        if ~isfinite(hi) || hi <= 0, hi = 1; end
+        clim = [0 hi];
+    end
+
+    figure('Name', 'CD truth-library error in used regions', 'Position', [30 70 1700 760]);
+    for b = 1:B
+        subplot(n_row, n_col, b);
+        scatter(GridValid.xy(:,1), GridValid.xy(:,2), 14, stat(b).err_old(:), 'filled');
+        hold on;
+        plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
+        overlay_probe_radius(filter_events_by_band(events, b), radius_m);
+        overlay_opportunistic_priors(filter_events_by_band(events, b), true);
+        axis equal tight;
+        grid on;
+        caxis(clim);
+        colorbar;
+        title(sprintf('B%d before truth err, mean=%.2f dB', b, stat(b).mean_old));
+        xlabel('X (m)');
+        ylabel('Y (m)');
+
+        subplot(n_row, n_col, B + b);
+        scatter(GridValid.xy(:,1), GridValid.xy(:,2), 14, stat(b).err_new(:), 'filled');
+        hold on;
+        imp = isfinite(stat(b).err_old) & isfinite(stat(b).err_new) & stat(b).err_new < stat(b).err_old;
+        plot(GridValid.xy(imp,1), GridValid.xy(imp,2), '.', 'Color', [0.0 0.75 0.2], 'MarkerSize', 6);
+        plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
+        overlay_probe_radius(filter_events_by_band(events, b), radius_m);
+        overlay_opportunistic_priors(filter_events_by_band(events, b), true);
+        axis equal tight;
+        grid on;
+        caxis(clim);
+        colorbar;
+        title(sprintf('B%d after truth err, mean=%.2f dB, d=%.2f', ...
+            b, stat(b).mean_new, stat(b).delta_mean));
+        xlabel('X (m)');
+        ylabel('Y (m)');
+        text(0.02, 0.98, sprintf('inside=%d, improved=%d', stat(b).n_mask, stat(b).improve_count), ...
+            'Units', 'normalized', 'VerticalAlignment', 'top', ...
+            'Color', [0.1 0.1 0.1], 'FontSize', 8, ...
+            'BackgroundColor', [1 1 1 0.65]);
+    end
+    sgtitle(sprintf('RF raw dBm RMS error against SpatialFP\\_lognormal\\_new inside used CD regions (radius %.0fm)', radius_m));
+end
+
+
+function mask = build_cd_used_region_mask(grid_xy, events, radius_m)
+    mask = false(size(grid_xy, 1), 1);
+    if isempty(events), return; end
+    for i = 1:numel(events)
+        lp = events(i).location_prior;
+        local_mask = false(size(mask));
+        switch lower(lp.type)
+            case 'region'
+                bbox = prior_bbox(lp);
+                local_mask = grid_xy(:,1) >= bbox(1) & grid_xy(:,1) <= bbox(2) & ...
+                    grid_xy(:,2) >= bbox(3) & grid_xy(:,2) <= bbox(4);
+                center_xy = [0.5 * (bbox(1) + bbox(2)), 0.5 * (bbox(3) + bbox(4))];
+            case 'gaussian'
+                [mu, Sigma] = prior_gaussian(lp);
+                S = 0.5 * (Sigma + Sigma') + 1e-9 * eye(2);
+                X = grid_xy - mu;
+                local_mask = sum((X / S) .* X, 2) <= 5.991;
+                center_xy = mu;
+            otherwise
+                center_xy = representative_prior_xy(lp);
+        end
+        if all(isfinite(center_xy))
+            d = sqrt(sum((grid_xy - center_xy).^2, 2));
+            local_mask = local_mask | (d <= radius_m);
+        end
+        mask = mask | local_mask;
+    end
+end
+
+
+function e = rms_ap_error(F, F_ref)
+    M = min(size(F, 1), size(F_ref, 1));
+    G = min(size(F, 2), size(F_ref, 2));
+    D = F(1:M, 1:G) - F_ref(1:M, 1:G);
+    e = NaN(G, 1);
+    for g = 1:G
+        v = D(:, g);
+        v = v(isfinite(v));
+        if ~isempty(v)
+            e(g) = sqrt(mean(v.^2));
+        end
+    end
+end
+
+
+function F = align_band_matrix(F, GridValid)
+    G = size(GridValid.xy, 1);
+    if size(F, 2) ~= G && size(F, 1) == G
+        F = F';
+    end
+    if size(F, 2) > G
+        F = F(:, 1:G);
+        return;
+    end
+    if size(F, 2) < G
+        pad = NaN(size(F, 1), G - size(F, 2));
+        F = [F, pad];
+    end
+end
+
+
+function q = percentile_local(x, pct)
+    x = sort(x(isfinite(x)));
+    if isempty(x)
+        q = NaN;
+        return;
+    end
+    pos = 1 + (numel(x) - 1) * pct / 100;
+    lo = floor(pos);
+    hi = ceil(pos);
+    if lo == hi
+        q = x(lo);
+    else
+        q = x(lo) + (x(hi) - x(lo)) * (pos - lo);
+    end
 end
 
 
