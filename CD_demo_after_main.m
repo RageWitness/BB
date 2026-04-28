@@ -511,60 +511,106 @@ end
 
 
 function plot_cd_local_probe_compare_by_band(before, after, used_events, SpatialFP, GridValid, APs, radius_m)
+    plot_cd_local_probe_one_figure(before, after, used_events, SpatialFP, GridValid, APs, radius_m, 'before');
+    plot_cd_local_probe_one_figure(after, before, used_events, SpatialFP, GridValid, APs, radius_m, 'after');
+end
+
+
+function plot_cd_local_probe_one_figure(primary, other, used_events, SpatialFP, GridValid, APs, radius_m, mode_name)
     B = SpatialFP.B;
     n_col = min(B, 4);
     n_row = ceil(B / n_col);
-    figure('Name', 'CD local probe before after by band', 'Position', [40 80 1650 800]);
+    if strcmpi(mode_name, 'after')
+        fig_name = 'CD local probe after by band';
+        main_title = sprintf('%.0fm local synthetic target probes: CD pending library', radius_m);
+    else
+        fig_name = 'CD local probe before by band';
+        main_title = sprintf('%.0fm local synthetic target probes: original library', radius_m);
+    end
+    figure('Name', fig_name, 'Position', [40 80 1650 800]);
     for b = 1:B
         subplot(n_row, n_col, b);
         plot(GridValid.xy(:,1), GridValid.xy(:,2), '.', 'Color', [0.94 0.94 0.94], 'MarkerSize', 2);
         hold on;
         plot(APs.pos_xy(:,1), APs.pos_xy(:,2), 'r^', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
-        plot_probe_result_pair(before, after, b);
+        [n_probe, n_improved] = plot_probe_result_single(primary, other, b, mode_name);
         used_b = filter_events_by_band(used_events, b);
         overlay_probe_radius(used_b, radius_m);
         overlay_opportunistic_priors(used_b, true);
         axis equal tight;
         grid on;
-        title(sprintf('Band %d local probes around used CD opp', b));
+        title(sprintf('Band %d local probes %s', b, mode_name));
         xlabel('X (m)');
         ylabel('Y (m)');
-        add_cd_probe_legend();
-        text(0.02, 0.98, sprintf('probe=%d, used opp=%d', ...
-            count_loc_band(after, b), count_event_band(used_events, b)), ...
+        add_cd_probe_legend(mode_name);
+        text(0.02, 0.98, sprintf('probe=%d, improved=%d, used opp=%d', ...
+            n_probe, n_improved, count_event_band(used_events, b)), ...
             'Units', 'normalized', 'VerticalAlignment', 'top', ...
             'Color', [0.1 0.1 0.1], 'FontSize', 8, ...
             'BackgroundColor', [1 1 1 0.65]);
     end
-    sgtitle(sprintf('%.0fm local synthetic target probes: original library vs CD pending library', radius_m));
+    sgtitle(main_title);
 end
 
 
-function plot_probe_result_pair(before, after, band_id)
-    if isempty(after), return; end
-    for k = 1:numel(after)
-        lr_a = after(k);
-        if lr_a.band_id ~= band_id
+function [n_probe, n_improved] = plot_probe_result_single(primary, other, band_id, mode_name)
+    n_probe = 0;
+    n_improved = 0;
+    if isempty(primary), return; end
+    for k = 1:numel(primary)
+        lr = primary(k);
+        if lr.band_id ~= band_id
             continue;
         end
-        true_xy = lr_a.true_pos_xy;
+        true_xy = lr.true_pos_xy;
         if isempty(true_xy) || any(~isfinite(true_xy))
             continue;
         end
-        plot(true_xy(1), true_xy(2), 'o', 'Color', [0.1 0.1 0.1], ...
-            'MarkerFaceColor', [0.1 0.1 0.1], 'MarkerSize', 4);
-        before_idx = find_matching_loc_result(before, lr_a.event_id);
-        if before_idx > 0
-            lr_b = before(before_idx);
-            plot(lr_b.est_pos_xy(1), lr_b.est_pos_xy(2), 'x', ...
-                'Color', [0.75 0.2 0.2], 'MarkerSize', 7, 'LineWidth', 1.2);
-            plot([true_xy(1), lr_b.est_pos_xy(1)], [true_xy(2), lr_b.est_pos_xy(2)], ...
-                '-', 'Color', [0.9 0.55 0.55], 'LineWidth', 0.7);
+        if isempty(lr.est_pos_xy) || any(~isfinite(lr.est_pos_xy))
+            continue;
         end
-        plot(lr_a.est_pos_xy(1), lr_a.est_pos_xy(2), '+', ...
-            'Color', [0.05 0.45 0.9], 'MarkerSize', 7, 'LineWidth', 1.3);
-        plot([true_xy(1), lr_a.est_pos_xy(1)], [true_xy(2), lr_a.est_pos_xy(2)], ...
-            '-', 'Color', [0.45 0.7 0.95], 'LineWidth', 0.7);
+
+        n_probe = n_probe + 1;
+        other_idx = find_matching_loc_result(other, lr.event_id);
+        improved = false;
+        if other_idx > 0
+            lr_other = other(other_idx);
+            err_primary = norm(lr.est_pos_xy - true_xy);
+            err_other = norm(lr_other.est_pos_xy - true_xy);
+            if strcmpi(mode_name, 'after')
+                improved = err_primary < err_other;
+            else
+                improved = err_other < err_primary;
+            end
+            if improved
+                n_improved = n_improved + 1;
+            end
+        end
+
+        if strcmpi(mode_name, 'after')
+            if improved
+                est_color = [0.0 0.65 0.20];
+                true_color = [0.0 0.55 0.15];
+                line_color = [0.25 0.75 0.35];
+            else
+                est_color = [0.05 0.45 0.9];
+                true_color = [0.1 0.1 0.1];
+                line_color = [0.45 0.7 0.95];
+            end
+            est_marker = '+';
+        else
+            est_color = [0.75 0.2 0.2];
+            true_color = [0.1 0.1 0.1];
+            line_color = [0.9 0.55 0.55];
+            est_marker = 'x';
+        end
+
+        plot(true_xy(1), true_xy(2), 'o', 'Color', true_color, ...
+            'MarkerFaceColor', true_color, 'MarkerSize', 4);
+        plot(lr.est_pos_xy(1), lr.est_pos_xy(2), est_marker, ...
+            'Color', est_color, 'MarkerSize', 7, 'LineWidth', 1.3);
+        plot([true_xy(1), lr.est_pos_xy(1)], [true_xy(2), lr.est_pos_xy(2)], ...
+            '-', 'Color', line_color, 'LineWidth', 0.7);
     end
 end
 
@@ -795,16 +841,23 @@ function add_cd_target_legend()
 end
 
 
-function add_cd_probe_legend()
+function add_cd_probe_legend(mode_name)
     h1 = plot(NaN, NaN, 'r^', 'MarkerSize', 8, 'MarkerFaceColor', 'r');
     h2 = plot(NaN, NaN, 'o', 'Color', [0.1 0.1 0.1], ...
         'MarkerFaceColor', [0.1 0.1 0.1], 'MarkerSize', 4);
-    h3 = plot(NaN, NaN, 'x', 'Color', [0.75 0.2 0.2], 'MarkerSize', 7, 'LineWidth', 1.2);
-    h4 = plot(NaN, NaN, '+', 'Color', [0.05 0.45 0.9], 'MarkerSize', 7, 'LineWidth', 1.3);
-    h5 = plot(NaN, NaN, 's', 'Color', [0 0.5 0.2], 'MarkerSize', 5);
-    h6 = plot(NaN, NaN, 'o', 'Color', [0.05 0.25 0.7], ...
+    h3 = plot(NaN, NaN, 's', 'Color', [0 0.5 0.2], 'MarkerSize', 5);
+    h4 = plot(NaN, NaN, 'o', 'Color', [0.05 0.25 0.7], ...
         'MarkerFaceColor', [0.05 0.25 0.7], 'MarkerSize', 4);
-    legend([h1 h2 h3 h4 h5 h6], ...
-        {'AP','probe true','before est','after est','CD region opp','CD gaussian opp'}, ...
-        'Location', 'best');
+    if strcmpi(mode_name, 'after')
+        h5 = plot(NaN, NaN, '+', 'Color', [0.0 0.65 0.20], 'MarkerSize', 7, 'LineWidth', 1.3);
+        h6 = plot(NaN, NaN, '+', 'Color', [0.05 0.45 0.9], 'MarkerSize', 7, 'LineWidth', 1.3);
+        legend([h1 h2 h5 h6 h3 h4], ...
+            {'AP','probe true','after improved','after not improved','CD region opp','CD gaussian opp'}, ...
+            'Location', 'best');
+    else
+        h5 = plot(NaN, NaN, 'x', 'Color', [0.75 0.2 0.2], 'MarkerSize', 7, 'LineWidth', 1.2);
+        legend([h1 h2 h5 h3 h4], ...
+            {'AP','probe true','before est','CD region opp','CD gaussian opp'}, ...
+            'Location', 'best');
+    end
 end
