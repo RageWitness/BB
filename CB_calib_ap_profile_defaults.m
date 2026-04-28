@@ -34,6 +34,19 @@ function cfg = CB_calib_ap_profile_defaults(Config)
     cfg = set_default(cfg, 'jitter_rel', 1e-6);
     cfg = set_default(cfg, 'jitter_abs', 1e-8);
 
+    cfg = set_default(cfg, 'offline_fit_enable', true);
+    cfg = set_default(cfg, 'offline_fit_train_fraction', 0.60);
+    cfg = set_default(cfg, 'offline_fit_max_train_points', 180);
+    cfg = set_default(cfg, 'offline_fit_max_val_points', 120);
+    cfg = set_default(cfg, 'offline_fit_min_points', 30);
+    cfg = set_default(cfg, 'offline_fit_seed', 20260428);
+    cfg = set_default(cfg, 'offline_fit_ell_grid_m', [15, 30, 60, 100]);
+    cfg = set_default(cfg, 'offline_fit_sigma_f_grid_dB', [2, 5, 8, 12]);
+    cfg = set_default(cfg, 'offline_fit_sigma0_grid_dB', [0.8, 1.5, 3, 6, 10]);
+    cfg = set_default(cfg, 'offline_fit_w_rmse', 1.0);
+    cfg = set_default(cfg, 'offline_fit_w_loglik', 0.05);
+    cfg = set_default(cfg, 'offline_fit_verbose', false);
+
     cfg = set_default(cfg, 'validation_fraction', 0.20);
     cfg = set_default(cfg, 'loc_rmse_threshold_m', 13);
     cfg = set_default(cfg, 'enable_fast_search', true);
